@@ -1,0 +1,58 @@
+name: Windows EXE derle
+
+on:
+  push:
+    branches: ["main", "claude/**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Bağımlılıkları kur
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Testler
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q
+
+      - name: EXE derle
+        run: >
+          pyinstaller --noconfirm --clean --onefile --windowed --name KreatifBot
+          --exclude-module PyQt5 --exclude-module PyQt6 --exclude-module tkinter --exclude-module matplotlib
+          main.py
+
+      - name: EXE açılış testi
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $p = Start-Process -FilePath dist\KreatifBot.exe -ArgumentList "--self-test" -PassThru -Wait
+          if ($p.ExitCode -ne 0) { throw "KreatifBot.exe açılış testi başarısız (çıkış kodu $($p.ExitCode))" }
+          Get-Item dist\KreatifBot.exe | Select-Object Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KreatifBot-windows
+          path: dist/KreatifBot.exe
+          retention-days: 30
+
+      - name: Sürüm yayınla (v* etiketi)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/KreatifBot.exe
+    permissions:
+      contents: write
