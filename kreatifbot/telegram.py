@@ -235,6 +235,21 @@ class TelegramNotifier:
             label = {"NEW_SYMBOL": "Yeni işlem çifti", "NOW_TRADING": "İşleme açıldı", "ANNOUNCED": "Duyuruldu",
                      "HALTED": "İşlem durduruldu"}.get(ev.kind, ev.kind)
             return f"🆕 <b>Listeleme: {esc(ev.symbol)}</b> — {label} ({esc(ev.source)}, durum {esc(ev.status or '-')})"
+        if kind == "insight" and self.notify.get("news", True):
+            ins = payload
+            icon = "🟢" if ins.signal == "AL" else "💡"
+            from .intel.catalyst import CATALYST_TR
+            cats = ", ".join(CATALYST_TR.get(t, t) for t in ins.catalyst.types) or "-"
+            fd = ins.fundamentals
+            text = (f"{icon} <b>Öngörü: {esc(ins.symbol)} — {esc(ins.signal)}</b> (potansiyel {ins.potential:.0f}/100)\n"
+                    f"Katalizör: {esc(cats)} ({esc(', '.join(ins.catalyst.sources))})\n"
+                    f"Temel skor: {'-' if fd.score is None else f'{fd.score:.0f}'} · Teknik: "
+                    f"{'-' if ins.technical.score is None else f'{ins.technical.score:.0f}'}")
+            if ins.signal == "AL":
+                text += f"\nGiriş ~{ins.entry:.6g} · Stop {ins.stop:.6g}"
+            if ins.catalyst.headlines:
+                text += f"\n{esc(ins.catalyst.headlines[0][:200])}"
+            return text + "\n<i>Yatırım tavsiyesi değildir.</i>"
         if kind == "halt" and self.notify["risk"]:
             return f"⛔ <b>Günlük zarar limiti aşıldı</b>\n{esc(payload)}\nBugün yeni pozisyon açılmayacak."
         if kind == "alert" and self.notify["errors"] and isinstance(payload, dict):

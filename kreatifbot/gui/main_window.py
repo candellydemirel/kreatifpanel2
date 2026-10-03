@@ -222,6 +222,10 @@ class MainWindow(QMainWindow):
     def _route_event(self, kind: str, payload):
         if kind == "decision":
             self.intel_tab.on_live_decision(payload)
+        elif kind == "insight":
+            self.news_tab.add_live_insight(payload)
+            if payload.signal == "AL":
+                self.status(f"💡 Öngörü AL sinyali: {payload.symbol} (potansiyel {payload.potential:.0f})")
         elif kind in ("news", "listing"):
             self.news_tab._load_cached()
             if kind == "listing":

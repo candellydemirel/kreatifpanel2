@@ -238,6 +238,33 @@ class ListingConfig:
 
 
 @dataclass
+class CatalystConfig:
+    enabled: bool = True
+    trade_enabled: bool = True           # AL sinyallerinde işlem (aşamaya bağlı)
+    stage: str = "PAPER"
+    scan_minutes: int = 30
+    lookback_hours: float = 72.0
+    half_life_hours: float = 24.0        # Haber etkisinin yarılanma süresi
+    min_catalyst: float = 50.0           # AL için minimum katalizör skoru
+    min_potential: float = 65.0          # AL için minimum toplam potansiyel
+    watch_potential: float = 45.0        # İZLE için minimum
+    max_chase_pct: float = 15.0          # Haberden beri bu kadar yükseldiyse "fiyatlanmış"
+    min_quote_volume_24h: float = 5_000_000
+    weight_catalyst: float = 0.45
+    weight_fundamental: float = 0.30
+    weight_technical: float = 0.25
+    use_coingecko: bool = True
+    use_defillama: bool = True
+    any_binance_pair: bool = False       # False: yalnızca izinli semboller işlenir
+    risk_multiplier: float = 0.5
+    stop_atr_mult: float = 2.0
+    tp_levels_r: list = field(default_factory=lambda: [1.5, 3.0])
+    tp_fractions: list = field(default_factory=lambda: [0.5, 0.5])
+    max_hold_hours: float = 72.0
+    max_concurrent: int = 2
+
+
+@dataclass
 class IntelConfig:
     market: str = "SPOT"                 # SPOT | USDM_FUTURES
     quote_asset: str = "USDT"
@@ -256,6 +283,7 @@ class IntelConfig:
     backtest: BacktestConfig = field(default_factory=BacktestConfig)
     news: NewsConfig = field(default_factory=NewsConfig)
     listing: ListingConfig = field(default_factory=ListingConfig)
+    catalyst: CatalystConfig = field(default_factory=CatalystConfig)
     strategies: dict = field(default_factory=dict)  # anahtar -> StrategyConfig
 
     def strategy(self, key: str) -> StrategyConfig:
@@ -288,6 +316,13 @@ class IntelConfig:
             errors.append(f"listing: geçersiz aşama {lc.stage}")
         if not 0 < lc.risk_multiplier <= 1:
             errors.append("listing.risk_multiplier 0-1 arasında olmalı")
+        cc = self.catalyst
+        if len(cc.tp_levels_r) != len(cc.tp_fractions) or abs(sum(cc.tp_fractions) - 1) > 1e-6:
+            errors.append("catalyst.tp_levels_r ve catalyst.tp_fractions uyumsuz")
+        if cc.stage not in [s.value for s in LifecycleStage]:
+            errors.append(f"catalyst: geçersiz aşama {cc.stage}")
+        if not 0 < cc.risk_multiplier <= 1:
+            errors.append("catalyst.risk_multiplier 0-1 arasında olmalı")
         for tf in self.allowed_timeframes:
             if tf not in INTERVALS:
                 errors.append(f"İzin verilen zaman dilimi geçersiz: {tf}")

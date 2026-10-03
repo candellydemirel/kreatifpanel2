@@ -100,6 +100,14 @@ Haberler deterministik kurallarla sınıflandırılır (LISTING, DELISTING, HACK
 
 **Yeni Listeleme stratejisi:** yeni işleme açılan çiftleri `watch_hours` boyunca izler; açılıştan `wait_minutes` sonra açılış aralığının (ilk 15 dk) hacimli taze kırılımında, fiyat VWAP üstündeyse ve kırılımın çok üstüne çıkmamışsa (kovalamama) LONG açar. Stop aralık dibi (en fazla %8), hedefler 1R/2R/3R, en fazla 240 dk, risk normalin ¼'ü, aynı anda en fazla 1 listeleme işlemi. Varsayılan aşama **PAPER**. **Listeleme backtest** gerçek Binance 1 dk verisiyle (ücret + 3× kayma) geçmiş listelemeleri test eder.
 
+## 💡 Öngörü motoru (haber katalizörü + temel + teknik)
+**Haberler → 💡 Öngörüler** ve bot çalışırken her 30 dakikada bir:
+1. **Katalizör skoru (0-100):** son 72 saatteki haberlerde ortaklık/anlaşma, ETF, kurumsal ilgi, mainnet/yükseltme, büyük borsa listelemesi, benimseme, yatırım turu, yakım/geri alım (olumlu); token kilidi açılımı, hack, dava, delist (olumsuz). Kaynak güvenilirliği, bağımsız kaynak teyidi, 24 saatlik yarılanma ve "söylenti/iddia" ifadeleri hesaba katılır.
+2. **Temel skor (0-100):** whitepaper'ın işlevselliği için ölçülebilir vekil veriler — DeFiLlama TVL, 7 günlük TVL değişimi, piyasa değeri/TVL; CoinGecko geliştirici aktivitesi (4 hafta commit), piyasa değeri sırası, proje yaşı, whitepaper linki. Whitepaper metni otomatik değerlendirilmez. Veri yoksa UNAVAILABLE.
+3. **Teknik onay (Binance):** rejim düşüşte değil, 1s EMA50 üstü, 4s eğilim, 24s hacim artışı, yeterli likidite. Haberden beri fiyat %15'ten fazla yükseldiyse **fiyatlanmış** sayılır (kovalanmaz).
+
+Sonuç: **🟢 AL** (güçlü katalizör + teknik onay + eşikler) veya **💡 İZLE**. AL sinyalinde ATR stop, 1.5R/3R hedef, en fazla 72 saat, risk normalin yarısı; risk motoru, haber filtresi ve aşama kontrolü uygulanır (varsayılan **PAPER**, yalnızca izinli semboller). Geçmiş haber arşivi olmadığından klasik backtest yapılamaz: her öngörü kaydedilir ve **4s/24s/72s sonraki gerçek getirileri** "Öngörü performansı" tablosunda katalizör türüne göre ölçülür.
+
 ## 🖥 Bilgisayarınızda 7/24 çalıştırma
 **Ayarlar → Arka planda çalışma** bölümünden:
 - **Sistem tepsisi:** pencereyi kapatınca bot durmaz; saatin yanındaki **K** simgesinde çalışır (yeşil = bot çalışıyor). Simgeye tıklayınca pencere açılır, sağ tık → **Çıkış** ile tamamen kapanır.
@@ -152,6 +160,7 @@ kreatifbot/
   telegram.py               Telegram bildirimleri ve komutlar
   system.py                 Windows uyku engeli ve otomatik başlatma
   intel/news.py, listing.py Haber kaynakları, listeleme izleme ve Yeni Listeleme stratejisi
+  intel/catalyst.py         Öngörü motoru: katalizör, temel (DeFiLlama/CoinGecko), teknik onay, performans takibi
   intel/                    Zeka Motoru: veri, özellik, rejim, MTF, stratejiler, skor, ML, risk, yürütme,
                             pozisyon yönetimi, karar, backtest, araştırma, sinyal veritabanı, canlı motor
   config.py                 Ayarlar ve DPAPI ile anahtar şifreleme

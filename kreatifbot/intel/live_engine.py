@@ -44,7 +44,7 @@ class IntelligentBotEngine(EngineCore):
     def __init__(self, cfg: IntelConfig, symbols: list[str], market_client, venue, store: SignalStore | None,
                  futures_client=None, decision_engine: DecisionEngine | None = None, poll_seconds: float = 20,
                  state_path: str | Path | None = None, on_event=None, kline_limit: int = 600,
-                 btc_client=None, news_monitor=None):
+                 btc_client=None, news_monitor=None, insight_engine=None, insight_store=None):
         self.cfg = cfg
         self.symbols = [s.strip().upper() for s in symbols if s.strip()]
         if not self.symbols:
@@ -90,6 +90,11 @@ class IntelligentBotEngine(EngineCore):
         self.news = news_monitor
         self.listing_watch: dict[str, float] = {}      # sembol -> izlemeye alınma zamanı (epoch)
         self.listing_signals: dict = {}
+        self.insights = insight_engine
+        self.insight_store = insight_store
+        self.last_insights: list = []
+        self._last_insight_scan = 0.0
+        self._tradable_bases: set = set()
         self._load_state()
 
     # ------------------------------------------------------------------ yardımcılar
@@ -350,6 +355,9 @@ class IntelligentBotEngine(EngineCore):
             symbols = self.client.exchange_info().get("symbols", [])
         except BinanceAPIError as exc:
             self._api_error(exc)
+        if symbols:
+            self._tradable_bases = {x.get("baseAsset") for x in symbols
+                                    if x.get("quoteAsset") == self.quote_asset and x.get("status") == "TRADING"}
         new_items, events = self.news.poll(symbols)
         watched = {s[:-len(self.quote_asset)] for s in set(self.symbols) | set(self.positions)}
         for it in new_items:
@@ -371,28 +379,46 @@ class IntelligentBotEngine(EngineCore):
                     self._apply_actions(sym, pos, [ExitAction(ExitReason.EMERGENCY_EXIT, pos.qty, price, True,
                                                               "Delist duyurusu")], price)
 
-    def _listing_tick(self):
+    EXTERNAL = ("new_listing", "news_catalyst")
+
+    def _external_limits(self, strategy: str):
+        if strategy == "news_catalyst":
+            c = self.cfg.catalyst
+            return c.max_hold_hours * 60, c.tp_levels_r, c.tp_fractions
         lc = self.cfg.listing
-        if not lc.enabled:
-            return
-        now = time.time()
-        # Listeleme pozisyonlarını yönet (ana sembol listesinde olmayanlar)
+        return lc.max_hold_minutes, lc.tp_levels_r, lc.tp_fractions
+
+    def _manage_external(self):
+        """Ana sembol listesi dışındaki (listeleme / haber katalizörü) pozisyonları yönetir."""
         from .position_manager import ExitAction
         for sym, pos in list(self.positions.items()):
-            if pos.strategy != "new_listing" or sym in self.symbols:
+            if pos.strategy not in self.EXTERNAL or sym in self.symbols:
                 continue
+            max_min, levels, fracs = self._external_limits(pos.strategy)
             price = self.client.price(sym)
             self.last_prices[sym] = price
             acts = update_on_bar(pos, pd.Series({"open": price, "high": price, "low": price, "close": price,
-                                                 "atr": np.nan}), self._listing_risk_cfg(), count_bar=False)
+                                                 "atr": np.nan}), self._listing_risk_cfg(levels, fracs),
+                                 count_bar=False)
             self._apply_actions(sym, pos, acts, price)
             pos = self.positions.get(sym)
             if pos is not None:
                 opened = pd.Timestamp(pos.opened_at)
                 opened = opened if opened.tzinfo else opened.tz_localize("UTC")
-                if (pd.Timestamp.now(tz="UTC") - opened).total_seconds() / 60 >= lc.max_hold_minutes:
+                if (pd.Timestamp.now(tz="UTC") - opened).total_seconds() / 60 >= max_min:
                     self._apply_actions(sym, pos, [ExitAction(ExitReason.TIME_EXPIRY, pos.qty, price, True,
-                                                              f"Maksimum {lc.max_hold_minutes} dk")], price)
+                                                              f"Maksimum {max_min:.0f} dk")], price)
+
+    def _listing_tick(self):
+        self._manage_external()
+        try:
+            self._insight_tick()
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"Öngörü taraması hatası: {exc}", logging.WARNING)
+        lc = self.cfg.listing
+        if not lc.enabled:
+            return
+        now = time.time()
         for sym, since in list(self.listing_watch.items()):
             if now - since > lc.watch_hours * 3600:
                 self.listing_watch.pop(sym, None)
@@ -401,12 +427,114 @@ class IntelligentBotEngine(EngineCore):
                 continue
             self._evaluate_listing(sym)
 
-    def _listing_risk_cfg(self):
+    def _listing_risk_cfg(self, levels=None, fracs=None):
         import copy
         rc = copy.deepcopy(self.cfg.risk)
-        rc.tp_levels_r, rc.tp_fractions = list(self.cfg.listing.tp_levels_r), list(self.cfg.listing.tp_fractions)
+        rc.tp_levels_r = list(levels or self.cfg.listing.tp_levels_r)
+        rc.tp_fractions = list(fracs or self.cfg.listing.tp_fractions)
         rc.trailing_method = "percent"
         return rc
+
+    def _insight_tick(self):
+        cc = self.cfg.catalyst
+        if self.insights is None or self.news is None or not cc.enabled:
+            return
+        if time.time() - self._last_insight_scan < cc.scan_minutes * 60:
+            return
+        self._last_insight_scan = time.time()
+        items = self.news.store.recent(cc.lookback_hours)
+        bases = self._tradable_bases or {s[:-len(self.quote_asset)] for s in self.symbols}
+        insights = self.insights.scan(items, bases)
+        self.last_insights = insights
+        if self.insight_store is not None:
+            try:
+                self.insight_store.update_outcomes(self.client)
+            except Exception as exc:  # noqa: BLE001
+                self.log(f"Öngörü sonuçları güncellenemedi: {exc}", logging.WARNING)
+        for ins in insights:
+            fresh = self.insight_store.save(ins) if self.insight_store is not None else True
+            if ins.signal in ("AL", "İZLE") and fresh:
+                self._emit("insight", ins)
+                self.log(f"Öngörü {ins.symbol}: {ins.signal} (potansiyel {ins.potential:.0f}, katalizör "
+                         f"{ins.catalyst.score:.0f})")
+            if ins.signal != "AL" or not cc.trade_enabled or ins.symbol in self.positions:
+                continue
+            if not cc.any_binance_pair and self.cfg.allowed_symbols and ins.symbol not in self.cfg.allowed_symbols:
+                self.log(f"{ins.symbol}: AL öngörüsü var ama izinli sembol listesinde değil (işlem yok)")
+                continue
+            self._open_external(ins.symbol, ins.entry, ins.stop, ins.targets, cc.tp_fractions, "news_catalyst",
+                                ins.explain(), ins.reasons, cc.risk_multiplier, cc.stage, cc.max_concurrent,
+                                min(95.0, ins.potential), "NEWS")
+
+    def _open_external(self, symbol, entry, stop, targets, fractions, strategy, explanation, reasons,
+                       risk_mult, stage, max_concurrent, confidence, regime_label) -> bool:
+        """Harici sinyal (listeleme / haber katalizörü) için ortak, risk kontrollü emir yolu."""
+        live = bool(self.venue.is_live)
+        from .types import LIVE_STAGES, LifecycleStage
+        if live and LifecycleStage(stage) not in LIVE_STAGES:
+            self.log(f"{symbol}: {strategy} sinyali var ama aşama {stage} (canlı işlem izni yok)")
+            return False
+        if sum(1 for p in self.positions.values() if p.strategy == strategy) >= max_concurrent:
+            return False
+        if len(self.positions) >= self.cfg.risk.max_open_positions:
+            self.log(f"{symbol}: maksimum açık pozisyon dolu, {strategy} sinyali atlandı")
+            return False
+        if self.news is not None and self.news.context(symbol).block_long:
+            self.log(f"{symbol}: {strategy} sinyali olumsuz haber nedeniyle reddedildi")
+            return False
+        from .risk_engine import position_size
+        try:
+            rules = self._rules_for(symbol)
+            book = self.client.depth(symbol, 100)
+        except BinanceAPIError as exc:
+            self._api_error(exc)
+            return False
+        ob = orderbook_features(book) if book else {"available": False}
+        price = ob.get("mid", entry)
+        if (price - stop) <= 0:
+            self.log(f"{symbol}: fiyat stop'un altında, {strategy} sinyali iptal")
+            return False
+        sz = position_size(self.equity(), price, stop, self.cfg.risk, confidence, risk_mult, True, self.market,
+                           self.venue.available_balance(), self._exposure())
+        if not sz.ok:
+            self.log(f"{symbol}: {strategy} boyutu hesaplanamadı ({'; '.join(sz.reasons)})")
+            return False
+        chk = pretrade_check(rules, sz.qty, price, "LONG", self.cfg, book, self.venue.available_balance(),
+                             self.market, 1)
+        if not chk.ok:
+            self.log(f"{symbol}: {strategy} emir ön kontrolü başarısız → {'; '.join(chk.errors)}", logging.WARNING)
+            return False
+        d = DecisionObject(signal_id=uuid.uuid4().hex[:16], symbol=symbol, market=self.market,
+                           timeframe="1m" if strategy == "new_listing" else "1h", direction="LONG",
+                           signal_status=SignalStatus.CONFIRMED.value, strategy=strategy, confidence=confidence,
+                           market_regime=regime_label, entry=entry, stop_loss=stop, take_profit=targets[-1],
+                           take_profit_levels=list(targets), position_size=float(chk.qty),
+                           notional=float(chk.qty) * price, reasons=list(reasons), explanation=explanation,
+                           created_at=datetime.now(timezone.utc).isoformat())
+        if self.store is not None:
+            try:
+                self.store.save_decision(d, source="live" if live else "paper")
+            except DatabaseError as exc:
+                self.log(f"Veritabanı hatası: {exc} → emir gönderilmedi", logging.ERROR)
+                return False
+        try:
+            fill = self.venue.open(symbol, "LONG", float(chk.qty), price, rules, 1, stop)
+        except (ExecutionError, BinanceAPIError) as exc:
+            self.log(f"{symbol}: {strategy} emri başarısız — {exc}", logging.ERROR)
+            self._status(d, SignalStatus.CANCELLED)
+            return False
+        pos = open_position(symbol, self.market, "LONG", fill.price, fill.qty, stop,
+                            [fill.price + (t - entry) for t in targets], fractions, strategy,
+                            datetime.now(timezone.utc).isoformat(), 0, 0, 0, confidence, regime_label, d.signal_id)
+        pos.fees_paid = fill.fee
+        self.positions[symbol] = pos
+        self._status(d, SignalStatus.EXECUTED)
+        label = "YENİ LİSTELEME ALIMI" if strategy == "new_listing" else "HABER KATALİZÖRÜ ALIMI"
+        self.log(f"{label} {symbol}: {fill.qty:.8g} @ {fill.price:.8g} | SL {stop:.8g}")
+        self._save_state()
+        self._emit("positions", None)
+        self._emit("opened", pos)
+        return True
 
     def _evaluate_listing(self, symbol: str):
         from .listing import evaluate_listing
@@ -429,58 +557,10 @@ class IntelligentBotEngine(EngineCore):
         self._emit("listing_signal", sig)
         if not sig.ok:
             return
-        live = bool(self.venue.is_live)
-        from .types import LIVE_STAGES, LifecycleStage
-        if live and LifecycleStage(lc.stage) not in LIVE_STAGES:
-            self.log(f"{symbol}: listeleme sinyali var ama aşama {lc.stage} (canlı işlem izni yok)")
-            return
-        if sum(1 for p in self.positions.values() if p.strategy == "new_listing") >= lc.max_concurrent:
-            return
-        if self.news is not None and self.news.context(symbol).block_long:
-            self.log(f"{symbol}: listeleme sinyali olumsuz haber nedeniyle reddedildi")
-            return
-        from .risk_engine import position_size
-        rules = self._rules_for(symbol)
-        sz = position_size(self.equity(), sig.entry, sig.stop, self.cfg.risk, 75.0, lc.risk_multiplier,
-                           True, self.market, self.venue.available_balance(), self._exposure())
-        if not sz.ok:
-            self.log(f"{symbol}: listeleme boyutu hesaplanamadı ({'; '.join(sz.reasons)})")
-            return
-        price = ob.get("mid", sig.entry)
-        chk = pretrade_check(rules, sz.qty, price, "LONG", self.cfg, book, self.venue.available_balance(),
-                             self.market, 1)
-        if not chk.ok:
-            self.log(f"{symbol}: listeleme emri ön kontrolü başarısız → {'; '.join(chk.errors)}", logging.WARNING)
-            return
-        d = DecisionObject(signal_id=uuid.uuid4().hex[:16], symbol=symbol, market=self.market,
-                           timeframe="1m", direction="LONG", signal_status=SignalStatus.CONFIRMED.value,
-                           strategy="new_listing", confidence=75.0, market_regime="LISTING", entry=sig.entry,
-                           stop_loss=sig.stop, take_profit=sig.targets[-1], take_profit_levels=sig.targets,
-                           position_size=float(chk.qty), notional=float(chk.qty) * price, reasons=sig.reasons,
-                           explanation=sig.explain(), created_at=datetime.now(timezone.utc).isoformat())
-        if self.store is not None:
-            try:
-                self.store.save_decision(d, source="live" if live else "paper")
-            except DatabaseError as exc:
-                self.log(f"Veritabanı hatası: {exc} → listeleme emri gönderilmedi", logging.ERROR)
-                return
-        try:
-            fill = self.venue.open(symbol, "LONG", float(chk.qty), price, rules, 1, sig.stop)
-        except (ExecutionError, BinanceAPIError) as exc:
-            self.log(f"{symbol}: listeleme emri başarısız — {exc}", logging.ERROR)
-            self._status(d, SignalStatus.CANCELLED)
-            return
-        pos = open_position(symbol, self.market, "LONG", fill.price, fill.qty, sig.stop,
-                            [fill.price + (t - sig.entry) for t in sig.targets], lc.tp_fractions, "new_listing",
-                            datetime.now(timezone.utc).isoformat(), 0, 0, 0, 75.0, "LISTING", d.signal_id)
-        pos.fees_paid = fill.fee
-        self.positions[symbol] = pos
-        self.listing_watch.pop(symbol, None)
-        self._status(d, SignalStatus.EXECUTED)
-        self.log(f"YENİ LİSTELEME ALIMI {symbol}: {fill.qty:.8g} @ {fill.price:.8g} | SL {sig.stop:.8g}")
-        self._save_state()
-        self._emit("positions", None)
-        self._emit("opened", pos)
+        if self._open_external(symbol, sig.entry, sig.stop, sig.targets, lc.tp_fractions, "new_listing",
+                               sig.explain(), sig.reasons, lc.risk_multiplier, lc.stage, lc.max_concurrent, 75.0,
+                               "LISTING"):
+            self.listing_watch.pop(symbol, None)
 
     # ------------------------------------------------------------------ giriş
     def _try_pending(self, symbol: str, price: float, book: dict | None):
@@ -658,7 +738,7 @@ class IntelligentBotEngine(EngineCore):
             return
         for p in data.get("positions", []):
             pos = ManagedPosition.from_dict(p)
-            if (pos.symbol in self.symbols or pos.strategy == "new_listing") and pos.market == self.market:
+            if (pos.symbol in self.symbols or pos.strategy in self.EXTERNAL) and pos.market == self.market:
                 self.positions[pos.symbol] = pos
         self.trades = [ClosedTrade.from_dict(t) for t in data.get("trades", [])]
         if not self.venue.is_live and "paper_cash" in data:

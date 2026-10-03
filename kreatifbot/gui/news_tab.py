@@ -101,6 +101,36 @@ class NewsTab(QWidget):
         ll.addLayout(bt_row)
         ll.addWidget(self.bt_table, 1)
 
+        # öngörüler
+        ins_page = QWidget()
+        il = QVBoxLayout(ins_page)
+        irow = QHBoxLayout()
+        self.ins_btn = QPushButton("💡 Öngörüleri üret (haber + temel + teknik)")
+        self.ins_btn.clicked.connect(self.run_insights)
+        self.perf_btn = QPushButton("Öngörü sonuçlarını güncelle")
+        self.perf_btn.clicked.connect(self.update_performance)
+        irow.addWidget(self.ins_btn)
+        irow.addWidget(self.perf_btn)
+        irow.addStretch()
+        self.ins_table = make_table(["Sembol", "Sinyal", "Potansiyel", "Katalizör", "Temel", "Teknik",
+                                     "Katalizör türleri", "Kaynaklar", "Uyarılar"])
+        self.ins_table.doubleClicked.connect(self._show_insight)
+        self.ins_detail = QPlainTextEdit()
+        self.ins_detail.setReadOnly(True)
+        self.ins_detail.setFont(mono())
+        self.perf_table = make_table(["-"])
+        isp = QSplitter()
+        isp.addWidget(self.ins_table)
+        isp.addWidget(self.ins_detail)
+        il.addLayout(irow)
+        il.addWidget(isp, 2)
+        perf_label = QLabel("Öngörü performansı — kaydedilen öngörülerin 4s/24s/72s sonraki GERÇEK getirileri "
+                            "(geçmiş haber arşivi olmadığı için doğrulama ileriye dönük yapılır):")
+        perf_label.setWordWrap(True)
+        il.addWidget(perf_label)
+        il.addWidget(self.perf_table, 1)
+        self._insights: list = []
+
         # ayarlar
         set_page = QWidget()
         sf = QFormLayout(set_page)
@@ -133,6 +163,17 @@ class NewsTab(QWidget):
         self.s_wait.setRange(1, 240)
         self.s_wait.setValue(lc.wait_minutes)
         self.s_wait.setSuffix(" dk")
+        cc = cfg.catalyst
+        self.c_enabled = QCheckBox("Öngörü motorunu çalıştır (bot çalışırken her 30 dk)")
+        self.c_enabled.setChecked(cc.enabled)
+        self.c_trade = QCheckBox("AL öngörülerinde işlem aç (aşamaya bağlı)")
+        self.c_trade.setChecked(cc.trade_enabled)
+        self.c_stage = QComboBox()
+        self.c_stage.addItems(["PAPER", "SHADOW", "LIMITED_LIVE", "FULL_LIVE"])
+        self.c_stage.setCurrentText(cc.stage if cc.stage in ("PAPER", "SHADOW", "LIMITED_LIVE", "FULL_LIVE")
+                                    else "PAPER")
+        self.c_any = QCheckBox("İzinli sembol listesi dışındaki Binance USDT çiftlerinde de işlem aç")
+        self.c_any.setChecked(cc.any_binance_pair)
         save = QPushButton("Kaydet")
         save.clicked.connect(self.save_settings)
         self.s_msg = QLabel()
@@ -140,7 +181,9 @@ class NewsTab(QWidget):
                          ("", self.s_dc), ("CryptoPanic API anahtarı", self.s_token),
                          ("Olumsuz haber sonrası LONG yasağı", self.s_block), ("", self.s_delist),
                          ("", self.s_listing), ("Listeleme stratejisi aşaması", self.s_stage),
-                         ("Açılıştan sonra bekleme", self.s_wait), ("", save), ("", self.s_msg)):
+                         ("Açılıştan sonra bekleme", self.s_wait), ("", self.c_enabled), ("", self.c_trade),
+                         ("Öngörü işlemleri aşaması", self.c_stage), ("", self.c_any), ("", save),
+                         ("", self.s_msg)):
             sf.addRow(label, w)
         warn = QLabel("⚠ Yeni listelemeler ilk saatlerde aşırı oynaktır. Canlı işlem yalnızca aşama LIMITED_LIVE / "
                       "FULL_LIVE iken ve çok küçük riskle yapılır. Önce 'Listeleme backtest' ile geçmiş "
@@ -152,6 +195,7 @@ class NewsTab(QWidget):
         tabs = QTabWidget()
         tabs.addTab(news_page, "Haber akışı")
         tabs.addTab(list_page, "Binance listelemeleri")
+        tabs.addTab(ins_page, "💡 Öngörüler")
         tabs.addTab(set_page, "Ayarlar")
         lay = QVBoxLayout(self)
         lay.addLayout(top)
@@ -311,6 +355,91 @@ class NewsTab(QWidget):
 
         self.ctx.tasks.run(work, done, failed)
 
+    # ---------------------------------------------------------------- öngörüler
+    def _render_insights(self):
+        rows, colors = [], []
+        for ins in self._insights:
+            fd, tc = ins.fundamentals, ins.technical
+            rows.append([ins.symbol, ins.signal, f"{ins.potential:.0f}", f"{ins.catalyst.score:.0f}",
+                         "-" if fd.score is None else f"{fd.score:.0f}", "-" if tc.score is None else f"{tc.score:.0f}",
+                         ", ".join(ins.catalyst.types), ", ".join(ins.catalyst.sources), "; ".join(ins.warnings[:2])])
+            colors.append(GREEN if ins.signal == "AL" else None)
+        fill_table(self.ins_table, rows, colors)
+
+    def add_live_insight(self, ins):
+        self._insights = [x for x in self._insights if x.symbol != ins.symbol]
+        self._insights.insert(0, ins)
+        self._render_insights()
+
+    def _show_insight(self, index):
+        if 0 <= index.row() < len(self._insights):
+            self.ins_detail.setPlainText(self._insights[index.row()].explain())
+
+    def run_insights(self):
+        cfg = load_intel_config()
+        self.ins_btn.setEnabled(False)
+        self.ins_detail.setPlainText("Haberler, DeFiLlama/CoinGecko ve Binance fiyatları taranıyor...")
+
+        def work():
+            from ..binance_client import BinanceAPIError, BinanceClient
+            from ..intel.catalyst import InsightEngine, InsightStore
+            from ..intel.news import NewsStore
+            client = BinanceClient(testnet=False)
+            try:
+                syms = client.exchange_info().get("symbols", [])
+                bases = {x["baseAsset"] for x in syms if x.get("quoteAsset") == cfg.quote_asset
+                         and x.get("status") == "TRADING"}
+            except BinanceAPIError:
+                bases = {s[:-len(cfg.quote_asset)] for s in cfg.allowed_symbols}
+            items = NewsStore().recent(cfg.catalyst.lookback_hours)
+            engine = InsightEngine(cfg.catalyst, client, quote=cfg.quote_asset)
+            insights = engine.scan(items, bases)
+            store = InsightStore()
+            for ins in insights:
+                store.save(ins)
+            return insights, engine.fund.status, len(items)
+
+        def done(res):
+            insights, status, n_items = res
+            self.ins_btn.setEnabled(True)
+            self._insights = insights
+            self._render_insights()
+            st = " | ".join(f"{k}: {v}" for k, v in status.items()) or "temel veri kaynağı çağrılmadı"
+            if not insights:
+                self.ins_detail.setPlainText(f"Son {cfg.catalyst.lookback_hours:.0f} saatteki {n_items} haberde "
+                                             "Binance'te işlem gören bir coin için olumlu katalizör bulunamadı.\n"
+                                             "Önce 'Haberleri ve listelemeleri tara'ya basın.\n" + st)
+            else:
+                self.ins_detail.setPlainText(insights[0].explain() + "\n\nKaynaklar: " + st)
+
+        def failed(msg):
+            self.ins_btn.setEnabled(True)
+            self.ins_detail.setPlainText(f"Öngörü taraması başarısız: {msg}")
+
+        self.ctx.tasks.run(work, done, failed)
+
+    def update_performance(self):
+        self.perf_btn.setEnabled(False)
+
+        def work():
+            from ..binance_client import BinanceClient
+            from ..intel.catalyst import InsightStore
+            store = InsightStore()
+            n = store.update_outcomes(BinanceClient(testnet=False))
+            return n, store.performance()
+
+        def done(res):
+            n, perf = res
+            self.perf_btn.setEnabled(True)
+            df_to_table(self.perf_table, perf, "ort_24s_%")
+            self.ctx.status(f"{n} öngörünün gerçekleşen getirisi güncellendi.")
+
+        def failed(msg):
+            self.perf_btn.setEnabled(True)
+            self.ctx.status(f"Güncelleme başarısız: {msg}")
+
+        self.ctx.tasks.run(work, done, failed)
+
     # ---------------------------------------------------------------- ayarlar
     def save_settings(self):
         cfg = load_intel_config()
@@ -324,6 +453,10 @@ class NewsTab(QWidget):
         lc.enabled = self.s_listing.isChecked()
         lc.stage = self.s_stage.currentText()
         lc.wait_minutes = self.s_wait.value()
+        cfg.catalyst.enabled = self.c_enabled.isChecked()
+        cfg.catalyst.trade_enabled = self.c_trade.isChecked()
+        cfg.catalyst.stage = self.c_stage.currentText()
+        cfg.catalyst.any_binance_pair = self.c_any.isChecked()
         try:
             save_intel_config(cfg)
         except (OSError, ValueError) as exc:

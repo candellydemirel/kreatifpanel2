@@ -326,6 +326,22 @@ def intel_section(story, W):
                            f"fazla %{ic.listing.max_stop_pct:.0f}, en fazla {ic.listing.max_hold_minutes} dk, risk x"
                            f"{ic.listing.risk_multiplier}, aşama {ic.listing.stage}"],
     ], [W * 0.25, W * 0.75]))
+    story.append(P("Öngörü motoru (haber katalizörü)", "h2"))
+    cc = ic.catalyst
+    story.append(table([
+        ["Bileşen", "Ağırlık", "İçerik"],
+        ["Katalizör", f"%{cc.weight_catalyst * 100:.0f}", "Ortaklık/anlaşma, ETF, kurumsal ilgi, mainnet, borsa "
+         "listelemesi, benimseme, yatırım turu, yakım (+); kilit açılımı, hack, dava, delist (−). Kaynak güvenilirliği, "
+         f"teyit, {cc.half_life_hours:.0f} saat yarılanma, söylenti cezası."],
+        ["Temel", f"%{cc.weight_fundamental * 100:.0f}", "DeFiLlama TVL ve değişimi, piyasa değeri/TVL; CoinGecko "
+         "geliştirici aktivitesi, sıralama, yaş. Whitepaper metni otomatik değerlendirilmez."],
+        ["Teknik", f"%{cc.weight_technical * 100:.0f}", f"Rejim, EMA50, 4s eğilim, hacim artışı, likidite; haberden "
+         f"beri %{cc.max_chase_pct:.0f}+ yükseliş = fiyatlanmış."],
+    ], [W * 0.15, W * 0.12, W * 0.73]))
+    story.append(P(f"AL: katalizör ≥ {cc.min_catalyst:.0f}, potansiyel ≥ {cc.min_potential:.0f}, teknik onay, olumsuz "
+                   f"baskı yok, söylenti değil. Stop {cc.stop_atr_mult}×ATR, hedefler {cc.tp_levels_r} R, en fazla "
+                   f"{cc.max_hold_hours:.0f} saat, risk ×{cc.risk_multiplier}, aşama {cc.stage}. Her öngörünün 4s/24s/72s "
+                   "gerçek getirisi kaydedilir; katalizör türlerinin işe yarayıp yaramadığı buradan ölçülür."))
     story.append(P("Canlı güvenlik: AI yoksa deterministik mod (ayara göre NO TRADE); piyasa verisi, sembol filtreleri, "
                    "veritabanı veya Binance API sorunu varsa yeni emir gönderilmez. Futures canlıda borsa tarafında "
                    "koruyucu STOP_MARKET konur. Backtest sonucu canlı performans garantisi değildir.", "warn"))

@@ -373,3 +373,43 @@ def test_background_settings_saved(app, window):
     s = load_settings()
     assert (s.minimize_to_tray, s.prevent_sleep, s.start_bot_on_launch) == (False, False, True)
     assert s.autostart is False  # Windows dışında ayarlanamaz
+
+
+def test_news_tab_insights(app, window, monkeypatch):
+    import kreatifbot.binance_client as bc
+    from kreatifbot.intel import catalyst as cat_mod
+    from kreatifbot.intel.news import NewsStore
+
+    from .test_catalyst import FakeAPISession, item, uptrend_1h
+    from .test_intel import resample
+    abc = uptrend_1h()
+
+    class FakeEx:
+        def __init__(self, *a, **k):
+            pass
+
+        def exchange_info(self):
+            return {"symbols": [{"symbol": "ABCUSDT", "status": "TRADING", "quoteAsset": "USDT", "baseAsset": "ABC"}]}
+
+        def klines(self, symbol, interval, limit=500, **kw):
+            return abc.tail(limit).reset_index(drop=True) if interval == "1h" else resample(abc, "4h")
+
+    monkeypatch.setattr(bc, "BinanceClient", FakeEx)
+    orig = cat_mod.FundamentalsProvider.__init__
+
+    def init(self, *a, **k):
+        k["session"] = FakeAPISession()
+        orig(self, *a, **k)
+    monkeypatch.setattr(cat_mod.FundamentalsProvider, "__init__", init)
+    from kreatifbot.intel.config import load_intel_config, save_intel_config
+    cfg = load_intel_config()
+    cfg.catalyst.min_quote_volume_24h = 1000
+    save_intel_config(cfg)
+    NewsStore().add([item("ABC partners with Microsoft", "ABC", 2, iid="g1"),
+                     item("ABC strikes partnership with Microsoft", "ABC", 3, "Decrypt", iid="g2")])
+    tab = window.news_tab
+    tab.run_insights()
+    assert wait(app, lambda: tab.ins_btn.isEnabled() and tab.ins_table.rowCount() > 0, timeout=30)
+    assert tab.ins_table.item(0, 0).text() == "ABCUSDT"
+    assert "Katalizör" in tab.ins_detail.toPlainText()
+    assert not window.errors
