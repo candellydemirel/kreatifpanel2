@@ -24,6 +24,21 @@ if TYPE_CHECKING:
     from .main_window import MainWindow
 
 
+# Küçük hesap profili risk çarpanları: trend takipçileri tam, kırılım/dönüş stratejileri daha temkinli,
+# çok kısa vadeli (scalp) ve türev verisine dayananlar en temkinli. Bot ayrıca bakımda öğrendiği
+# çarpanla riski performansa göre düşürür (kullanılan = bu çarpan × öğrenilen çarpan).
+FAMILY_MULT = {"ema": 1.0, "adx": 1.0, "supertrend": 1.0, "macd": 1.0, "structure": 1.0, "meta": 1.0,
+               "breakout": 0.75, "momentum": 0.75, "volatility": 0.75, "orderflow": 0.75,
+               "mean_reversion": 0.6, "statistical": 0.6, "vwap": 0.6, "derivatives": 0.5}
+
+
+def small_account_multiplier(spec) -> float:
+    mult = FAMILY_MULT.get(spec.family, 0.75)
+    if spec.style == "scalp":
+        mult = min(mult, 0.5)
+    return round(max(0.1, min(1.0, mult)), 2)
+
+
 def _tip(text: str, tip: str = "") -> QTableWidgetItem:
     item = QTableWidgetItem(text)
     if tip:
@@ -174,6 +189,22 @@ class IntelTab(QWidget):
         save_st = QPushButton("Strateji ayarlarını kaydet")
         save_st.clicked.connect(self.save_strategies)
         st_btns.addWidget(save_st)
+        st_btns.addSpacing(20)
+        st_btns.addWidget(QLabel("Hepsinin aşaması:"))
+        self.bulk_stage = stage_combo("PAPER")
+        st_btns.addWidget(self.bulk_stage)
+        bulk_btn = QPushButton("Tümüne uygula")
+        bulk_btn.setToolTip("Tablodaki bütün stratejilerin aşamasını seçilen aşamaya getirir (kaydetmek için "
+                            "'Strateji ayarlarını kaydet').")
+        bulk_btn.clicked.connect(lambda: self.set_all_stages(self.bulk_stage.currentData()))
+        st_btns.addWidget(bulk_btn)
+        st_btns.addSpacing(20)
+        live_btn = QPushButton("💵 Küçük hesap canlı profili (20 USDT)")
+        live_btn.setToolTip("Bütün stratejiler + yeni listeleme + haber öngörüleri 'Tam canlı' olur, küçük hesap "
+                            "risk ayarları uygulanır ve kaydedilir. Güvenlik kuralları (zarar limiti, devre kesici, "
+                            "olasılık tahmini olmadan işlem yok) aynen kalır.")
+        live_btn.clicked.connect(self.apply_small_live_profile)
+        st_btns.addWidget(live_btn)
         st_btns.addStretch()
         note = QLabel("Aşamalar: Araştırma → Geçmiş test → İleri test → Kağıt işlem → Gölge → Sınırlı canlı → "
                       "Tam canlı. Canlı işlem yalnızca 'Sınırlı canlı' (yarım risk) ve 'Tam canlı' stratejilerle "
@@ -312,6 +343,52 @@ class IntelTab(QWidget):
                                              EXPLAIN_TR["regimes"]))
             self.st_table.item(r, 1).setData(Qt.ItemDataRole.UserRole, key)
         self.st_table.resizeColumnsToContents()
+
+    def set_all_stages(self, stage: str):
+        for r in range(self.st_table.rowCount()):
+            box = self.st_table.cellWidget(r, 4)
+            idx = box.findData(stage)
+            if idx >= 0:
+                box.setCurrentIndex(idx)
+
+    def apply_small_live_profile(self, confirm: bool = True):
+        """20 USDT gibi küçük bir hesap için tüm stratejileri gerçek işleme hazırlar."""
+        if confirm and QMessageBox.question(
+                self, "Gerçek işlem profili",
+                "Bütün stratejiler, yeni listeleme ve haber öngörüleri 'Tam canlı' aşamasına alınacak.\n\n"
+                "Bot 'Canlı işlem' modunda başlatılırsa Binance Spot cüzdanınızdaki USDT ile GERÇEK emir "
+                "gönderir. Kâr garantisi yoktur; kaybetmeyi göze alabileceğiniz tutarla çalışın.\n\n"
+                "Risk çarpanları strateji türüne göre ayarlanır (trend 1.0, kırılım 0.75, ortalamaya dönüş 0.6, "
+                "kısa vadeli/türev 0.5).\n\nKorunan güvenlik kuralları: işlem başı risk %0.5 (en küçük emir için en fazla %1.5), günlük "
+                "zarar limiti %3, en fazla 3 açık pozisyon, art arda 4 zararda durma, olasılık tahmini olmadan "
+                "canlı işlem yok.\n\nDevam edilsin mi?") != QMessageBox.StandardButton.Yes:
+            return
+        cfg = self.cfg
+        for key, cls in REGISTRY.items():
+            sc = cfg.strategy(key)
+            sc.stage = "FULL_LIVE"
+            sc.risk_multiplier = small_account_multiplier(cls.spec)
+        cfg.listing.stage = "FULL_LIVE"
+        cfg.catalyst.stage = "FULL_LIVE"
+        r = cfg.risk
+        r.risk_per_trade_pct = 0.5
+        r.small_account_max_risk_pct = 1.5
+        r.max_open_positions = 3
+        r.max_daily_loss_pct = 3.0
+        r.max_consecutive_losses = 4
+        try:
+            save_intel_config(cfg)
+        except (OSError, ValueError) as exc:
+            self.ctx.show_error("Kaydedilemedi", str(exc))
+            return
+        self._fill_strategies()
+        self._load_editor()
+        news = getattr(self.ctx, "news_tab", None)
+        for box in (getattr(news, "s_stage", None), getattr(news, "c_stage", None)):
+            if box is not None and box.findData("FULL_LIVE") >= 0:
+                box.setCurrentIndex(box.findData("FULL_LIVE"))
+        self.ctx.status("Küçük hesap canlı profili kaydedildi. Bot sekmesinde 'Canlı işlem' seçip botu yeniden "
+                        "başlatın.")
 
     def save_strategies(self):
         for r in range(self.st_table.rowCount()):

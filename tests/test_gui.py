@@ -438,3 +438,33 @@ def test_autopilot_button_runs_everything(app, window, monkeypatch):
     bot.toggle_autopilot()
     assert wait(app, lambda: not bot.engine.running, timeout=40)
     assert not s.autopilot and not s.start_bot_on_launch and not window.settings_tab.autobot.isChecked()
+
+
+def test_small_live_profile(app, window):
+    from kreatifbot.intel.config import load_intel_config
+    tab = window.intel_tab
+    tab.set_all_stages("SHADOW")
+    assert all(tab.st_table.cellWidget(r, 4).currentData() == "SHADOW" for r in range(tab.st_table.rowCount()))
+    tab.apply_small_live_profile(confirm=False)
+    cfg = load_intel_config()
+    assert all(sc.stage == "FULL_LIVE" for sc in cfg.strategies.values())
+    assert cfg.listing.stage == cfg.catalyst.stage == "FULL_LIVE"
+    assert cfg.risk.max_open_positions == 3 and cfg.risk.require_probability_for_live
+    assert window.news_tab.s_stage.currentData() == "FULL_LIVE"
+
+
+def test_small_live_profile(app, window):
+    from kreatifbot.intel.config import load_intel_config
+    tab = window.intel_tab
+    tab.set_all_stages("SHADOW")
+    assert all(tab.st_table.cellWidget(r, 4).currentData() == "SHADOW" for r in range(tab.st_table.rowCount()))
+    tab.apply_small_live_profile(confirm=False)
+    cfg = load_intel_config()
+    assert all(sc.stage == "FULL_LIVE" for sc in cfg.strategies.values())
+    assert cfg.listing.stage == cfg.catalyst.stage == "FULL_LIVE"
+    assert cfg.strategy("trend_following").risk_multiplier == 1.0
+    assert cfg.strategy("mean_reversion").risk_multiplier == 0.6
+    assert cfg.strategy("vwap_reclaim").risk_multiplier == 0.5          # scalp
+    assert all(0.1 <= sc.risk_multiplier <= 1.0 for sc in cfg.strategies.values())
+    assert cfg.risk.max_open_positions == 3 and cfg.risk.require_probability_for_live
+    assert window.news_tab.s_stage.currentData() == "FULL_LIVE"
