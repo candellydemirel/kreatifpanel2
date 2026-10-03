@@ -397,7 +397,7 @@ class NewsMonitor:
     def __init__(self, store: NewsStore | None = None, session=None, rss_feeds: dict | None = None,
                  use_binance: bool = True, cryptopanic_token: str = "", quote: str = "USDT",
                  block_hours: float = 24.0, min_severity_block: int = 2, translator=None,
-                 translate_per_poll: int = 40):
+                 translate_per_poll: int = 40, translate_budget_s: float = 20.0):
         self.store = store or NewsStore()
         self.session = session or requests.Session()
         self.rss_feeds = RSS_FEEDS if rss_feeds is None else rss_feeds
@@ -408,6 +408,7 @@ class NewsMonitor:
         self.min_severity_block = min_severity_block
         self.translator = translator
         self.translate_per_poll = translate_per_poll
+        self.translate_budget_s = translate_budget_s
         self.source_status: dict[str, str] = {}
         self.known_bases: set = set()
         self.last_poll = 0.0
@@ -463,7 +464,10 @@ class NewsMonitor:
         queue = list(new_items or [])
         seen = {it.item_id for it in queue}
         queue += [it for it in self.store.untranslated(self.translate_per_poll) if it.item_id not in seen]
+        deadline = time.monotonic() + self.translate_budget_s
         for it in queue[:self.translate_per_poll]:
+            if time.monotonic() > deadline:
+                break                      # kalanlar sonraki taramada çevrilir (tarama uzamasın)
             if it.title_tr:
                 continue
             out = self.translator.translate(it.title)

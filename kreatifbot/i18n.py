@@ -75,11 +75,19 @@ MISC_TR = {
     "SPOT": "Spot", "USDM_FUTURES": "USDⓈ-M Vadeli", "AL": "AL", "İZLE": "İZLE", "YOK": "Sinyal yok",
 }
 
+FAMILY_TR = {
+    "adx": "ADX", "breakout": "Kırılım", "derivatives": "Türev (vadeli)", "ema": "Hareketli ortalama",
+    "macd": "MACD", "mean_reversion": "Ortalamaya dönüş", "meta": "Birleşik", "momentum": "Momentum",
+    "orderflow": "Emir akışı", "statistical": "İstatistiksel", "structure": "Piyasa yapısı",
+    "supertrend": "SuperTrend", "volatility": "Oynaklık", "vwap": "VWAP",
+}
+STYLE_TR = {"intraday": "Gün içi", "scalp": "Kısa vadeli (scalp)", "swing": "Birkaç gün (swing)"}
+
 LISTING_KIND_TR = {"NEW_SYMBOL": "Yeni işlem çifti", "NOW_TRADING": "İşleme açıldı", "ANNOUNCED": "Duyuruldu",
                    "HALTED": "İşlem durduruldu", "STATUS": "Durum değişti"}
 
 _ALL: dict[str, str] = {}
-for _d in (MISC_TR, REGIME_TR, STATUS_TR, EXIT_TR, NO_TRADE_TR, NEWS_CAT_TR, GROUP_TR, DIRECTION_TR, STAGE_TR):
+for _d in (FAMILY_TR, STYLE_TR, MISC_TR, REGIME_TR, STATUS_TR, EXIT_TR, NO_TRADE_TR, NEWS_CAT_TR, GROUP_TR, DIRECTION_TR, STAGE_TR):
     _ALL.update(_d)
 
 

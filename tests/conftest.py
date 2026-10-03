@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -41,3 +42,11 @@ def ohlcv():
 @pytest.fixture(autouse=True)
 def _tmp_home(tmp_path, monkeypatch):
     monkeypatch.setenv("KREATIFBOT_HOME", str(tmp_path / "home"))
+
+
+@pytest.fixture(autouse=True)
+def _no_network(monkeypatch):
+    """Testler gerçek ağa çıkmaz (CI'da internet olsa bile sonuçlar tekrarlanabilir kalır)."""
+    def blocked(self, method, url, *a, **kw):
+        raise requests.ConnectionError(f"test ortamında ağ kapalı: {url}")
+    monkeypatch.setattr(requests.Session, "request", blocked)

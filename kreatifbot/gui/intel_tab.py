@@ -166,9 +166,10 @@ class IntelTab(QWidget):
         save_st.clicked.connect(self.save_strategies)
         st_btns.addWidget(save_st)
         st_btns.addStretch()
-        note = QLabel("Aşamalar: RESEARCH → BACKTEST → WALK_FORWARD → PAPER → SHADOW → LIMITED_LIVE → FULL_LIVE. "
-                      "Canlı işlem yalnızca LIMITED_LIVE (yarım risk) ve FULL_LIVE stratejilerle yapılır. Backtest "
-                      "başarılı diye doğrudan FULL_LIVE'a geçmeyin.")
+        note = QLabel("Aşamalar: Araştırma → Geçmiş test → İleri test → Kağıt işlem → Gölge → Sınırlı canlı → "
+                      "Tam canlı. Canlı işlem yalnızca 'Sınırlı canlı' (yarım risk) ve 'Tam canlı' stratejilerle "
+                      "yapılır. Geçmiş test iyi diye doğrudan 'Tam canlı'ya geçmeyin. Risk çarpanı 1,00 = temel "
+                      "riskin tamamı; yalnızca azaltılabilir (0,1–1,0), asla artırılamaz.")
         note.setWordWrap(True)
         note.setStyleSheet("color:#8b949e;")
         stl.addWidget(note)
@@ -273,8 +274,8 @@ class IntelTab(QWidget):
             cb.setChecked(sc.enabled)
             self.st_table.setCellWidget(r, 0, cb)
             self.st_table.setItem(r, 1, QTableWidgetItem(f"{cls.spec.name} ({key})"))
-            self.st_table.setItem(r, 2, QTableWidgetItem(cls.spec.family))
-            self.st_table.setItem(r, 3, QTableWidgetItem(cls.spec.style))
+            self.st_table.setItem(r, 2, QTableWidgetItem(tr(cls.spec.family)))
+            self.st_table.setItem(r, 3, QTableWidgetItem(tr(cls.spec.style)))
             stage = stage_combo(sc.stage)
             self.st_table.setCellWidget(r, 4, stage)
             rm = QDoubleSpinBox()
@@ -362,7 +363,7 @@ class IntelTab(QWidget):
                     status = "Pasif: " + rt.inactive[st.key]
                 else:
                     status = "Aktif (sinyal yok)"
-                route_info[st.key] = (st.spec.name, st.spec.family, status)
+                route_info[st.key] = (st.spec.name, tr(st.spec.family), status)
             return {"decision": d, "fs": fs, "errors": bundle.errors, "route": route_info,
                     "gs": prep.gs.iloc[-1], "avail": prep.f.attrs.get("availability", {})}
 
