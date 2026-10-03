@@ -745,6 +745,9 @@ class BotTab(QWidget):
             w.setEnabled(not running)
         if not running:
             self._engine_changed()
+            lock = getattr(self, "_engine_lock", None)
+            if lock is not None:
+                lock.release()
         self.ctx.set_bot_running(running)
 
     # ---------------------------------------------------------------- başlat / durdur
@@ -836,6 +839,14 @@ class BotTab(QWidget):
         self.ctx.tasks.run(prepare, ready, failed)
 
     def _attach_engine(self, engine):
+        from ..headless import EngineLock
+        if getattr(self, "_engine_lock", None) is None:
+            self._engine_lock = EngineLock("KreatifBot masaüstü")
+        ok, msg = self._engine_lock.acquire()
+        if not ok:
+            self.start_btn.setEnabled(True)
+            self.ctx.show_error("Bot başlatılamadı", msg)
+            return
         notifier = self.ctx.make_notifier()
         if self.notifier is not None:
             self.notifier.stop(timeout=0)

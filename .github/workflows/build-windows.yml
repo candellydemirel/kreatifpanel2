@@ -44,6 +44,23 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "KreatifBot.exe açılış testi başarısız (çıkış kodu $($p.ExitCode))" }
           Get-Item dist\KreatifBot.exe | Select-Object Name, Length
 
+      - name: Jarvis2 entegrasyon paketi
+        shell: pwsh
+        run: |
+          $d = "jarvis2-paketi"
+          New-Item -ItemType Directory -Force $d | Out-Null
+          Copy-Item integrations\jarvis2\* $d -Recurse
+          Copy-Item kreatifbot $d\kreatifbot -Recurse
+          Remove-Item $d\kreatifbot\gui -Recurse -Force
+          Get-ChildItem $d -Recurse -Directory -Filter __pycache__ | Remove-Item -Recurse -Force
+          Get-ChildItem $d -Recurse | Select-Object FullName | Out-String | Write-Output
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KreatifBot-jarvis2-paketi
+          path: jarvis2-paketi
+          retention-days: 30
+
       - uses: actions/upload-artifact@v4
         with:
           name: KreatifBot-windows
