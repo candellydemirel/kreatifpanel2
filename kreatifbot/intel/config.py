@@ -202,6 +202,42 @@ class BacktestConfig:
 
 
 @dataclass
+class NewsConfig:
+    enabled: bool = True
+    poll_seconds: int = 120
+    use_binance_announcements: bool = True
+    rss_coindesk: bool = True
+    rss_cointelegraph: bool = True
+    rss_decrypt: bool = True
+    block_hours: float = 24.0            # Olumsuz haber sonrası yeni LONG yasağı süresi
+    min_severity_block: int = 2
+    delist_exit: bool = True             # Delist duyurusunda açık pozisyonu kapat
+    notify_min_severity: int = 2
+
+
+@dataclass
+class ListingConfig:
+    enabled: bool = True
+    stage: str = "PAPER"                 # Canlı için LIMITED_LIVE / FULL_LIVE gerekir
+    wait_minutes: int = 15               # Açılıştan sonra beklenecek süre (ilk dakikaların kaosu)
+    range_minutes: int = 15              # Açılış aralığı (opening range)
+    watch_hours: float = 6.0             # Listeleme sonrası izleme süresi
+    max_chase_pct: float = 6.0           # Kırılım seviyesinin bu kadar üstündeyse girme (kovalamama)
+    min_quote_volume: float = 2_000_000  # Açılıştan beri işlem hacmi (USDT)
+    max_spread_pct: float = 0.3
+    min_depth_quote: float = 20_000
+    volume_mult: float = 1.5             # Kırılım mumunun hacmi / önceki mumların ortalaması
+    max_stop_pct: float = 8.0
+    stop_buffer_pct: float = 0.3
+    tp_levels_r: list = field(default_factory=lambda: [1.0, 2.0, 3.0])
+    tp_fractions: list = field(default_factory=lambda: [0.4, 0.3, 0.3])
+    max_hold_minutes: int = 240
+    risk_multiplier: float = 0.25        # Normal işlem riskinin çeyreği
+    max_concurrent: int = 1
+    slippage_mult: float = 3.0           # Listelemelerde kayma varsayımı (backtest)
+
+
+@dataclass
 class IntelConfig:
     market: str = "SPOT"                 # SPOT | USDM_FUTURES
     quote_asset: str = "USDT"
@@ -218,6 +254,8 @@ class IntelConfig:
     funding: FundingConfig = field(default_factory=FundingConfig)
     ml: MLConfig = field(default_factory=MLConfig)
     backtest: BacktestConfig = field(default_factory=BacktestConfig)
+    news: NewsConfig = field(default_factory=NewsConfig)
+    listing: ListingConfig = field(default_factory=ListingConfig)
     strategies: dict = field(default_factory=dict)  # anahtar -> StrategyConfig
 
     def strategy(self, key: str) -> StrategyConfig:
@@ -243,6 +281,13 @@ class IntelConfig:
         for key, sc in self.strategies.items():
             if sc.stage not in [s.value for s in LifecycleStage]:
                 errors.append(f"{key}: geçersiz aşama {sc.stage}")
+        lc = self.listing
+        if len(lc.tp_levels_r) != len(lc.tp_fractions) or abs(sum(lc.tp_fractions) - 1) > 1e-6:
+            errors.append("listing.tp_levels_r ve listing.tp_fractions uyumsuz")
+        if lc.stage not in [s.value for s in LifecycleStage]:
+            errors.append(f"listing: geçersiz aşama {lc.stage}")
+        if not 0 < lc.risk_multiplier <= 1:
+            errors.append("listing.risk_multiplier 0-1 arasında olmalı")
         for tf in self.allowed_timeframes:
             if tf not in INTERVALS:
                 errors.append(f"İzin verilen zaman dilimi geçersiz: {tf}")

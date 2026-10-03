@@ -99,6 +99,7 @@ class NoTradeReason(StrEnum):
     STRATEGY_PAUSED = "STRATEGY_PAUSED"
     POSITION_EXISTS = "POSITION_EXISTS"
     DATABASE_FAILURE = "DATABASE_FAILURE"
+    NEWS_RISK = "NEWS_RISK"
 
 
 class StrategyHealth(StrEnum):

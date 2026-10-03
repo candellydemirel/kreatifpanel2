@@ -16,6 +16,7 @@ from .api_dialog import ApiKeyDialog
 from ..telegram import TelegramClient, TelegramNotifier
 from .tabs import AnalysisTab, BacktestTab, BotTab, ScannerTab, SettingsTab
 from .intel_tab import IntelTab
+from .news_tab import NewsTab
 from .research_tab import ResearchTab
 from .telegram_tab import TelegramTab
 from .widgets import TaskRunner
@@ -102,11 +103,13 @@ class MainWindow(QMainWindow):
         self.telegram_tab = TelegramTab(self)
         self.intel_tab = IntelTab(self)
         self.research_tab = ResearchTab(self)
+        self.news_tab = NewsTab(self)
         self.tabs.addTab(self.analysis, "📈  Piyasa Analizi")
         self.tabs.addTab(self.scanner, "🔎  Tarayıcı")
         self.tabs.addTab(self.backtest, "🧪  Backtest")
         self.tabs.addTab(self.intel_tab, "🧠  Zeka Motoru")
         self.tabs.addTab(self.research_tab, "🔬  Araştırma")
+        self.tabs.addTab(self.news_tab, "📰  Haberler")
         self.tabs.addTab(self.bot, "🤖  Bot")
         self.tabs.addTab(self.telegram_tab, "📨  Telegram")
         self.tabs.addTab(self.settings_tab, "⚙  Ayarlar")
@@ -219,6 +222,10 @@ class MainWindow(QMainWindow):
     def _route_event(self, kind: str, payload):
         if kind == "decision":
             self.intel_tab.on_live_decision(payload)
+        elif kind in ("news", "listing"):
+            self.news_tab._load_cached()
+            if kind == "listing":
+                self.status(f"Yeni listeleme olayı: {payload.symbol} ({payload.kind})")
 
     def telegram_ready(self) -> bool:
         s = self.settings

@@ -854,9 +854,14 @@ class BotTab(QWidget):
             try:
                 de = DecisionEngine(cfg, meta_model=self.ctx.intel_meta, strategy_stats=self.ctx.intel_stats,
                                     health=self.ctx.intel_health)
+                news = None
+                if cfg.news.enabled or cfg.listing.enabled:
+                    from .news_tab import build_monitor
+                    news = build_monitor(self.ctx.settings, cfg)
                 engine = IntelligentBotEngine(cfg, s.symbols, market_client, venue, store, futures_client=fut,
                                               decision_engine=de, poll_seconds=s.poll_seconds,
-                                              state_path=self._state_path(live), on_event=on_event)
+                                              state_path=self._state_path(live), on_event=on_event,
+                                              news_monitor=news)
             except ValueError as exc:
                 self.start_btn.setEnabled(True)
                 self.ctx.show_error("Zeka Motoru başlatılamadı", str(exc))

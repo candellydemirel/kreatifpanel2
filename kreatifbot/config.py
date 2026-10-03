@@ -114,6 +114,7 @@ class Settings:
     autostart: bool = False              # Windows açılınca uygulamayı başlat
     start_bot_on_launch: bool = False    # Uygulama açılınca botu otomatik başlat
     unattended_live_confirmed: bool = False  # Canlı modda onaysız otomatik başlatmaya izin (bilinçli onay)
+    cryptopanic_token: str = ""
     telegram_enabled: bool = False
     telegram_token: str = ""
     telegram_chat_id: str = ""
@@ -141,6 +142,7 @@ def load_settings() -> Settings:
         return Settings()
     data["api_secret"] = unprotect(data.get("api_secret", ""))
     data["telegram_token"] = unprotect(data.get("telegram_token", ""))
+    data["cryptopanic_token"] = unprotect(data.get("cryptopanic_token", ""))
     known = {k: v for k, v in data.items() if k in Settings.__dataclass_fields__}
     settings = Settings(**known)
     settings.risk = {**RiskSettings().to_dict(), **(settings.risk or {})}
@@ -151,6 +153,7 @@ def save_settings(settings: Settings) -> None:
     data = asdict(settings)
     data["api_secret"] = protect(settings.api_secret)
     data["telegram_token"] = protect(settings.telegram_token)
+    data["cryptopanic_token"] = protect(settings.cryptopanic_token)
     path = settings_path()
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")

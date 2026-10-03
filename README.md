@@ -87,6 +87,19 @@ Uygulamada üst menüdeki **🔑 Binance API Anahtarı** butonuna tıklayın (il
 - 🔒 **Para çekme iznini asla açmayın**, mümkünse IP kısıtlaması ekleyin.
 - Gizli anahtar bilgisayarınızda Windows DPAPI ile şifrelenmiş olarak saklanır: `%APPDATA%\KreatifBot\settings.json`.
 
+## 📰 Haberler ve yeni Binance listelemeleri
+**Haberler** sekmesi ve Zeka Motoru şu kaynakları tarar:
+- **Binance duyuruları:** yeni listeleme, delist, Binance haberleri (herkese açık CMS uç noktası; resmi belgelenmemiştir, biçim değişirse kaynak "ERİŞİLEMİYOR" görünür)
+- **Binance exchangeInfo farkı (resmi API):** yeni açılan / işleme başlayan / durdurulan USDT çiftleri
+- **RSS:** CoinDesk, Cointelegraph, Decrypt · **CryptoPanic** (isteğe bağlı ücretsiz API anahtarı)
+
+Haberler deterministik kurallarla sınıflandırılır (LISTING, DELISTING, HACK, REGULATION_NEG, LAUNCHPOOL, ...) ve coin sembolleri eşleştirilir. **Haber tek başına işlem açtırmaz:**
+- Olumsuz/yüksek önemli haber (hack, exploit, dava, delist) → o coinde yeni LONG açılmaz (`NEWS_RISK`)
+- Delist duyurusu → açık pozisyon kapatılır (`EMERGENCY_EXIT`) ve Telegram'a bildirilir
+- Olumlu haber skoru yükseltmez (hype kovalanmaz), yalnızca gerekçelerde gösterilir
+
+**Yeni Listeleme stratejisi:** yeni işleme açılan çiftleri `watch_hours` boyunca izler; açılıştan `wait_minutes` sonra açılış aralığının (ilk 15 dk) hacimli taze kırılımında, fiyat VWAP üstündeyse ve kırılımın çok üstüne çıkmamışsa (kovalamama) LONG açar. Stop aralık dibi (en fazla %8), hedefler 1R/2R/3R, en fazla 240 dk, risk normalin ¼'ü, aynı anda en fazla 1 listeleme işlemi. Varsayılan aşama **PAPER**. **Listeleme backtest** gerçek Binance 1 dk verisiyle (ücret + 3× kayma) geçmiş listelemeleri test eder.
+
 ## 🖥 Bilgisayarınızda 7/24 çalıştırma
 **Ayarlar → Arka planda çalışma** bölümünden:
 - **Sistem tepsisi:** pencereyi kapatınca bot durmaz; saatin yanındaki **K** simgesinde çalışır (yeşil = bot çalışıyor). Simgeye tıklayınca pencere açılır, sağ tık → **Çıkış** ile tamamen kapanır.
@@ -137,6 +150,8 @@ kreatifbot/
   broker.py                 Kağıt ve canlı emir yürütme
   engine.py                 Bot motoru (arka plan iş parçacığı)
   telegram.py               Telegram bildirimleri ve komutlar
+  system.py                 Windows uyku engeli ve otomatik başlatma
+  intel/news.py, listing.py Haber kaynakları, listeleme izleme ve Yeni Listeleme stratejisi
   intel/                    Zeka Motoru: veri, özellik, rejim, MTF, stratejiler, skor, ML, risk, yürütme,
                             pozisyon yönetimi, karar, backtest, araştırma, sinyal veritabanı, canlı motor
   config.py                 Ayarlar ve DPAPI ile anahtar şifreleme

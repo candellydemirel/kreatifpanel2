@@ -312,6 +312,20 @@ def intel_section(story, W):
     story.append(P("RESEARCH → BACKTEST → WALK_FORWARD → PAPER → SHADOW → LIMITED_LIVE (yarım risk) → FULL_LIVE. "
                    "Varsayılan aşama PAPER'dır; canlı işlem yalnızca LIMITED_LIVE ve FULL_LIVE stratejilerle yapılır. "
                    "Performans bozulursa strateji DEGRADED/PAUSED olur."))
+    story.append(P("Haberler ve yeni listelemeler", "h2"))
+    story.append(table([
+        ["Kaynak / kural", "Açıklama"],
+        ["Binance duyuruları", "Yeni listeleme, delist ve Binance haberleri (herkese açık CMS uç noktası)"],
+        ["exchangeInfo farkı", "Resmi API: yeni açılan, işleme başlayan veya durdurulan USDT çiftleri"],
+        ["RSS / CryptoPanic", "CoinDesk, Cointelegraph, Decrypt; isteğe bağlı CryptoPanic API anahtarı"],
+        ["Olumsuz haber", f"Hack, exploit, dava, delist → {ic.news.block_hours:.0f} saat yeni LONG yok (NEWS_RISK)"],
+        ["Delist duyurusu", "Açık pozisyon kapatılır (EMERGENCY_EXIT), Telegram bildirimi"],
+        ["Olumlu haber", "Skoru yükseltmez; hype kovalanmaz, yalnızca bilgi"],
+        ["Yeni Listeleme", f"Açılıştan {ic.listing.wait_minutes} dk sonra, ilk {ic.listing.range_minutes} dk aralığının "
+                           f"hacimli taze kırılımı, VWAP üstü, kovalamama (%{ic.listing.max_chase_pct:.0f}), stop en "
+                           f"fazla %{ic.listing.max_stop_pct:.0f}, en fazla {ic.listing.max_hold_minutes} dk, risk x"
+                           f"{ic.listing.risk_multiplier}, aşama {ic.listing.stage}"],
+    ], [W * 0.25, W * 0.75]))
     story.append(P("Canlı güvenlik: AI yoksa deterministik mod (ayara göre NO TRADE); piyasa verisi, sembol filtreleri, "
                    "veritabanı veya Binance API sorunu varsa yeni emir gönderilmez. Futures canlıda borsa tarafında "
                    "koruyucu STOP_MARKET konur. Backtest sonucu canlı performans garantisi değildir.", "warn"))

@@ -71,10 +71,10 @@ class BinanceFuturesClient(BinanceClient):
 
     # ------------------------------------------------------------------ piyasa verisi
     def klines(self, symbol: str, interval: str, limit: int = 500, end_time: int | None = None,
-               closed_only: bool = False) -> pd.DataFrame:
+               closed_only: bool = False, start_time: int | None = None) -> pd.DataFrame:
         raw = self._request("GET", "/fapi/v1/klines", {
             "symbol": symbol.upper(), "interval": interval, "limit": max(1, min(int(limit), 1500)),
-            "endTime": end_time})
+            "endTime": end_time, "startTime": start_time})
         if closed_only and raw:
             import time
             now_ms = int(time.time() * 1000) + self.time_offset_ms

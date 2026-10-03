@@ -200,7 +200,7 @@ class DecisionEngine:
                rules=None, book_stats: dict | None = None, live: bool = False,
                dq: QualityReport | None = None, has_position: bool = False, available_balance: float | None = None,
                correlations: pd.DataFrame | None = None, brackets: list | None = None,
-               funding_now: float | None = None) -> DecisionObject:
+               funding_now: float | None = None, news_ctx=None) -> DecisionObject:
         cfg = self.cfg
         f = prep.f
         n = len(f)
@@ -310,6 +310,14 @@ class DecisionEngine:
         d.mtf = {role: bias_label(v) for role, v in mdetail.items()}
         d.mtf["entry"] = bias_label(row.get("entry_bias"))
         d.mtf["score"] = None if mscore is None else round(mscore, 3)
+
+        # Haber bağlamı (haber tek başına işlem açtırmaz; yalnızca risk filtresi)
+        if news_ctx is not None:
+            if news_ctx.items:
+                d.reasons.append(f"Haber: son {len(news_ctx.items)} haber, ortalama duyarlılık "
+                                 f"{news_ctx.sentiment:+.2f}")
+            if (direction == "LONG" and news_ctx.block_long) or (direction == "SHORT" and news_ctx.block_short):
+                return no_trade(NoTradeReason.NEWS_RISK, "; ".join(news_ctx.reasons[:3]))
 
         # Çatışma / eşik kontrolleri
         threshold = cfg.scoring.min_trade_score + rt.threshold_bonus

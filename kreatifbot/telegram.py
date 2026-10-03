@@ -28,6 +28,7 @@ NOTIFY_LABELS = {
     "risk": "Risk uyarıları (günlük zarar limiti)",
     "errors": "Hatalar ve uyarılar",
     "daily_summary": "Günlük özet",
+    "news": "Önemli haberler ve yeni listelemeler (Zeka Motoru)",
 }
 NOTIFY_DEFAULTS = {k: True for k in NOTIFY_LABELS}
 
@@ -222,6 +223,18 @@ class TelegramNotifier:
             return (f"{icon} <b>{title} — {esc(t.symbol)}</b> ({esc(t.reason)})\n"
                     f"Giriş {_num(t.entry_price)} → Çıkış {_num(t.exit_price)}\n"
                     f"K/Z: <b>{t.pnl:+.2f} {self.quote} ({t.pnl_pct:+.2f}%)</b>")
+        if kind == "news" and self.notify.get("news", True):
+            it = payload
+            icon = {"DELISTING": "🚫", "HACK": "🚨", "REGULATION_NEG": "⚖️", "LISTING": "🆕",
+                    "FUTURES_LISTING": "🆕", "LAUNCHPOOL": "🎁"}.get(it.category, "📰")
+            coins = f" [{', '.join(it.symbols)}]" if it.symbols else ""
+            return (f"{icon} <b>{esc(it.category)}</b>{esc(coins)} — {esc(it.source)}\n{esc(it.title)}\n"
+                    f"Duyarlılık {it.sentiment:+.2f}" + (f"\n{esc(it.url)}" if it.url else ""))
+        if kind == "listing" and self.notify.get("news", True):
+            ev = payload
+            label = {"NEW_SYMBOL": "Yeni işlem çifti", "NOW_TRADING": "İşleme açıldı", "ANNOUNCED": "Duyuruldu",
+                     "HALTED": "İşlem durduruldu"}.get(ev.kind, ev.kind)
+            return f"🆕 <b>Listeleme: {esc(ev.symbol)}</b> — {label} ({esc(ev.source)}, durum {esc(ev.status or '-')})"
         if kind == "halt" and self.notify["risk"]:
             return f"⛔ <b>Günlük zarar limiti aşıldı</b>\n{esc(payload)}\nBugün yeni pozisyon açılmayacak."
         if kind == "alert" and self.notify["errors"] and isinstance(payload, dict):
