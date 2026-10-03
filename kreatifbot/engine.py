@@ -78,6 +78,8 @@ class BotEngine:
         logger.log(level, message)
         stamp = datetime.now().strftime("%H:%M:%S")
         self._emit("log", f"[{stamp}] {message}")
+        if level >= logging.WARNING:
+            self._emit("alert", {"level": level, "message": message})
 
     # ------------------------------------------------------------------ yaşam döngüsü
     @property
@@ -199,6 +201,7 @@ class BotEngine:
                  f" | SL {stop:.8g} | TP {take:.8g}")
         self._save_state()
         self._emit("positions", None)
+        self._emit("opened", self.positions[symbol])
 
     def _close(self, symbol: str, price: float, reason: str):
         pos = self.positions[symbol]
@@ -247,7 +250,8 @@ class BotEngine:
         if not self.halted_today and self.rm.daily_loss_hit(self._day_start_equity, equity):
             self.halted_today = True
             self.log(f"Günlük zarar limiti (%{self.risk.max_daily_loss_pct}) aşıldı. "
-                     "Bugün yeni pozisyon açılmayacak.", logging.WARNING)
+                     "Bugün yeni pozisyon açılmayacak.")
+            self._emit("halt", f"Gün başı: {self._day_start_equity:.2f}, şimdi: {equity:.2f} {self.quote_asset}")
         day_pct = (equity / self._day_start_equity - 1) * 100 if self._day_start_equity else 0.0
         self._emit("equity", {"equity": equity, "quote": self.broker.quote_balance(), "day_pct": day_pct})
 

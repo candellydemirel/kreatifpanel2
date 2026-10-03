@@ -157,3 +157,43 @@ def test_guide_pdf_bundled():
     from kreatifbot.config import GUIDE_PDF, resource_path
     path = resource_path(GUIDE_PDF)
     assert path.exists() and path.read_bytes()[:4] == b"%PDF"
+
+
+def test_bot_sends_telegram(app, window):
+    from kreatifbot.telegram import TelegramClient, TelegramNotifier
+
+    from .test_telegram import FakeTelegram
+    fake = FakeTelegram()
+    window.make_notifier = lambda: TelegramNotifier(TelegramClient("T", session=fake), "42", commands=False)
+    bot = window.bot
+    bot.paper.setChecked(True)
+    bot.symbols.setText("BTCUSDT")
+    bot.start()
+    assert wait(app, lambda: bot.engine is not None and bot.engine.running)
+    assert wait(app, lambda: any("başlatıldı" in m["text"] for m in fake.sent))
+    bot.stop()
+    assert wait(app, lambda: any("durduruldu" in m["text"] for m in fake.sent), timeout=40)
+    assert wait(app, lambda: not bot.notifier.running, timeout=10)
+
+
+def test_telegram_tab_save_and_scanner_send(app, window):
+    tab = window.telegram_tab
+    tab.enabled.setChecked(True)
+    tab.token.setText("123:abc")
+    tab.chat_id.setText("42")
+    tab.notify["signals"].setChecked(False)
+    tab.save()
+    from kreatifbot.config import load_settings
+    s = load_settings()
+    assert s.telegram_enabled and s.telegram_chat_id == "42" and s.telegram_notify["signals"] is False
+    assert window.telegram_ready()
+
+    sent = []
+    window.telegram_send = lambda text: sent.append(text)
+    window.scanner.run()
+    assert wait(app, lambda: window.scanner.tg_button.isEnabled())
+    window.scanner.send_telegram()
+    window.analysis.run()
+    assert wait(app, lambda: window.analysis.tg_button.isEnabled())
+    window.analysis.send_telegram()
+    assert "Piyasa taraması" in sent[0] and "analizi" in sent[1]

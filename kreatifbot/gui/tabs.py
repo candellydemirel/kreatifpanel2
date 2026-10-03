@@ -20,6 +20,7 @@ from ..broker import LiveBroker, PaperBroker
 from ..config import data_dir
 from ..engine import BotEngine
 from ..strategies import STRATEGIES, SmartEnsemble, create_strategy
+from ..telegram import esc
 from ..utils import fmt_money, fmt_pct, fmt_price, fmt_qty
 from .widgets import (
     GREEN, RED, EquityChart, PriceChart, RiskForm, StrategyPicker, combo_symbol, fill_table,
@@ -61,10 +62,15 @@ class AnalysisTab(QWidget):
         self.button = QPushButton("Analiz Et")
         self.button.setDefault(True)
         self.button.clicked.connect(self.run)
+        self.tg_button = QPushButton("📨 Telegram'a gönder")
+        self.tg_button.setEnabled(False)
+        self.tg_button.clicked.connect(self.send_telegram)
+        self.last_analysis = None
         for label, w in (("Sembol", self.symbol), ("Aralık", self.interval), ("Mum", self.candles)):
             top.addWidget(QLabel(label))
             top.addWidget(w)
         top.addWidget(self.button)
+        top.addWidget(self.tg_button)
         top.addStretch()
 
         self.chart = PriceChart()
@@ -118,6 +124,8 @@ class AnalysisTab(QWidget):
             self.button.setEnabled(True)
             self.chart.set_data(df, buys, sells, f"{symbol} · {interval}  (işaretler: Akıllı Kombine)")
             self.summary.setPlainText(analysis.summary_text())
+            self.last_analysis = (analysis, evals)
+            self.tg_button.setEnabled(True)
             rows = [[name, res.text, res.reason] for name, res in evals]
             fill_table(self.signals, rows, [signal_color(r[1]) for r in rows])
             self.ctx.status(f"{symbol}: skor {analysis.score:+.0f} → {analysis.recommendation}")
@@ -127,6 +135,21 @@ class AnalysisTab(QWidget):
             self.ctx.show_error("Analiz başarısız", msg)
 
         self.ctx.tasks.run(work, done, failed)
+
+
+    def send_telegram(self):
+        if not self.last_analysis:
+            return
+        a, evals = self.last_analysis
+        sigs = "\n".join(f"• {esc(name)}: <b>{res.text}</b>" for name, res in evals)
+        text = (f"🔍 <b>{esc(a.symbol)} ({esc(a.interval)}) analizi</b>\n"
+                f"Fiyat: {fmt_price(a.price)} ({fmt_pct(a.change_pct)})\n"
+                f"Skor: <b>{a.score:+.0f}</b> → <b>{a.recommendation}</b>\n"
+                f"Trend: {esc(a.trend)} · {esc(a.regime)} (ADX {a.adx:.0f})\n"
+                f"RSI {a.rsi:.0f} · Volatilite {a.volatility_pct:.2f}%\n"
+                f"Destek {fmt_price(a.support)} · Direnç {fmt_price(a.resistance)}\n\n"
+                f"<b>Strateji sinyalleri</b>\n{sigs}\n\n<i>Yatırım tavsiyesi değildir.</i>")
+        self.ctx.telegram_send(text)
 
 
 # ======================================================================== Tarayıcı
@@ -145,8 +168,12 @@ class ScannerTab(QWidget):
         self.interval = interval_combo("1h")
         self.button = QPushButton("Piyasayı Tara")
         self.button.clicked.connect(self.run)
+        self.tg_button = QPushButton("📨 Telegram'a gönder")
+        self.tg_button.setEnabled(False)
+        self.tg_button.clicked.connect(self.send_telegram)
+        self.last_rows: list = []
         for w in (self.top_mode, self.top_n, QLabel("parite"), self.custom_mode, self.custom,
-                  QLabel("Aralık"), self.interval, self.button):
+                  QLabel("Aralık"), self.interval, self.button, self.tg_button):
             top.addWidget(w)
         self.table = make_table(["Sembol", "Fiyat", "24s Değişim", "24s Hacim", "Trend", "Rejim",
                                  "RSI", "Volatilite", "Skor", "Öneri"])
@@ -157,6 +184,25 @@ class ScannerTab(QWidget):
         layout.addLayout(top)
         layout.addWidget(self.table)
         layout.addWidget(self.info)
+
+    def send_telegram(self):
+        if not self.last_rows:
+            return
+        rows = self.last_rows
+
+        def line(r):
+            sym, a, _ = r
+            icon = "🟢" if a.score >= 20 else ("🔴" if a.score <= -20 else "⚪")
+            return f"{icon} <b>{esc(sym)}</b> {a.score:+.0f} {a.recommendation} · RSI {a.rsi:.0f} · {esc(a.trend)}"
+
+        top = [line(r) for r in rows[:10]]
+        bottom = [line(r) for r in rows[-5:]] if len(rows) > 10 else []
+        text = (f"🔎 <b>Piyasa taraması ({esc(self.interval.currentText())}, {len(rows)} parite)</b>\n\n"
+                "<b>En güçlü</b>\n" + "\n".join(top))
+        if bottom:
+            text += "\n\n<b>En zayıf</b>\n" + "\n".join(bottom)
+        text += "\n\n<i>Yatırım tavsiyesi değildir.</i>"
+        self.ctx.telegram_send(text)
 
     def _open(self, index):
         item = self.table.item(index.row(), 0)
@@ -204,6 +250,8 @@ class ScannerTab(QWidget):
             rows, errors = result
             self.button.setEnabled(True)
             rows.sort(key=lambda r: r[1].score, reverse=True)
+            self.last_rows = rows
+            self.tg_button.setEnabled(bool(rows))
             table_rows, colors = [], []
             for sym, a, t in rows:
                 change = float(t.get("priceChangePercent", "nan") or "nan")
@@ -407,6 +455,7 @@ class BotTab(QWidget):
         super().__init__()
         self.ctx = ctx
         self.engine: BotEngine | None = None
+        self.notifier = None
         s = ctx.settings
 
         panel = QWidget()
@@ -619,15 +668,30 @@ class BotTab(QWidget):
             return broker
 
         def ready(broker):
+            notifier = self.ctx.make_notifier()
+            gui_emit = self.ctx.bridge.event.emit
+
+            def on_event(kind, payload):
+                gui_emit(kind, payload)
+                if notifier is not None:
+                    notifier.handle_event(kind, payload)
+
             try:
                 self.engine = BotEngine(
                     client, broker, strategy, risk, s.symbols, s.interval, s.quote_asset, s.poll_seconds,
-                    state_path=self._state_path(live), on_event=self.ctx.bridge.event.emit,
+                    state_path=self._state_path(live), on_event=on_event,
                 )
             except ValueError as exc:
                 self.start_btn.setEnabled(True)
                 self.ctx.show_error("Bot başlatılamadı", str(exc))
                 return
+            if self.notifier is not None:
+                self.notifier.stop(timeout=0)
+            self.notifier = notifier
+            if notifier is not None:
+                notifier.attach(self.engine)
+                notifier.start()
+                self.log.appendPlainText("[Telegram] Bildirimler etkin.")
             self._set_running(True)
             self.ctx.status("Bot çalışıyor.")
             self.log.appendPlainText("")
@@ -651,6 +715,8 @@ class BotTab(QWidget):
     def shutdown(self):
         if self.engine and self.engine.running:
             self.engine.stop(wait=True)
+        if self.notifier is not None:
+            self.notifier.stop(timeout=5)
 
     def _reset_paper(self):
         path = self._state_path(False)

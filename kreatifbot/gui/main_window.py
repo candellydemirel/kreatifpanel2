@@ -10,7 +10,9 @@ from .. import __version__
 from ..binance_client import BinanceClient
 from ..config import GUIDE_PDF, Settings, data_dir, load_settings, resource_path, save_settings
 from .api_dialog import ApiKeyDialog
+from ..telegram import TelegramClient, TelegramNotifier
 from .tabs import AnalysisTab, BacktestTab, BotTab, ScannerTab, SettingsTab
+from .telegram_tab import TelegramTab
 from .widgets import TaskRunner
 
 
@@ -65,10 +67,12 @@ class MainWindow(QMainWindow):
         self.backtest = BacktestTab(self)
         self.bot = BotTab(self)
         self.settings_tab = SettingsTab(self)
+        self.telegram_tab = TelegramTab(self)
         self.tabs.addTab(self.analysis, "📈  Piyasa Analizi")
         self.tabs.addTab(self.scanner, "🔎  Tarayıcı")
         self.tabs.addTab(self.backtest, "🧪  Backtest")
         self.tabs.addTab(self.bot, "🤖  Bot")
+        self.tabs.addTab(self.telegram_tab, "📨  Telegram")
         self.tabs.addTab(self.settings_tab, "⚙  Ayarlar")
         self.setCentralWidget(self.tabs)
         self.bridge.event.connect(self.bot.on_event, Qt.ConnectionType.QueuedConnection)
@@ -124,6 +128,28 @@ class MainWindow(QMainWindow):
         s = self.settings
         return BinanceClient(s.api_key, s.api_secret, testnet=s.testnet)
 
+    def telegram_ready(self) -> bool:
+        s = self.settings
+        return bool(s.telegram_enabled and s.telegram_token and s.telegram_chat_id)
+
+    def make_notifier(self) -> TelegramNotifier | None:
+        if not self.telegram_ready():
+            return None
+        s = self.settings
+        return TelegramNotifier(TelegramClient(s.telegram_token), s.telegram_chat_id, s.telegram_notify,
+                                s.quote_asset, s.telegram_commands, s.telegram_summary_hour)
+
+    def telegram_send(self, text: str):
+        """Tek seferlik mesaj (analiz / tarama sonucu)."""
+        if not self.telegram_ready():
+            self.show_error("Telegram ayarlı değil",
+                            "Telegram sekmesinden token ve Chat ID girip bildirimleri etkinleştirin.")
+            return
+        client, chat_id = TelegramClient(self.settings.telegram_token), self.settings.telegram_chat_id
+        self.tasks.run(lambda: client.send_message(chat_id, text),
+                       lambda _: self.status("Telegram'a gönderildi."),
+                       lambda m: self.show_error("Telegram gönderimi başarısız", m))
+
     def persist(self):
         try:
             save_settings(self.settings)
@@ -155,6 +181,7 @@ class MainWindow(QMainWindow):
     def set_bot_running(self, running: bool):
         self._bot_running = running
         self.settings_tab.setEnabled(not running)
+        self.telegram_tab.setEnabled(not running)
 
     # ---------------------------------------------------------------- kapanış
     def closeEvent(self, event):

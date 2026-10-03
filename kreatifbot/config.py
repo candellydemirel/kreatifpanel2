@@ -106,6 +106,12 @@ class Settings:
     paper_balance: float = 1000.0
     poll_seconds: int = 30
     live_mode: bool = False
+    telegram_enabled: bool = False
+    telegram_token: str = ""
+    telegram_chat_id: str = ""
+    telegram_commands: bool = True
+    telegram_summary_hour: int = 21
+    telegram_notify: dict = field(default_factory=dict)
 
     @property
     def risk_settings(self) -> RiskSettings:
@@ -126,6 +132,7 @@ def load_settings() -> Settings:
         logger.error("Ayarlar okunamadı: %s", exc)
         return Settings()
     data["api_secret"] = unprotect(data.get("api_secret", ""))
+    data["telegram_token"] = unprotect(data.get("telegram_token", ""))
     known = {k: v for k, v in data.items() if k in Settings.__dataclass_fields__}
     settings = Settings(**known)
     settings.risk = {**RiskSettings().to_dict(), **(settings.risk or {})}
@@ -135,6 +142,7 @@ def load_settings() -> Settings:
 def save_settings(settings: Settings) -> None:
     data = asdict(settings)
     data["api_secret"] = protect(settings.api_secret)
+    data["telegram_token"] = protect(settings.telegram_token)
     path = settings_path()
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")

@@ -67,9 +67,9 @@ def styles():
         "subtitle": ParagraphStyle("subtitle", fontName="Body", fontSize=13, leading=18, alignment=TA_CENTER,
                                    textColor=colors.HexColor("#44546a")),
         "h1": ParagraphStyle("h1", fontName="Body-Bold", fontSize=18, leading=23, textColor=NAVY,
-                             spaceBefore=6, spaceAfter=10),
+                             spaceBefore=6, spaceAfter=10, keepWithNext=1),
         "h2": ParagraphStyle("h2", fontName="Body-Bold", fontSize=13, leading=17, textColor=ACCENT,
-                             spaceBefore=10, spaceAfter=5),
+                             spaceBefore=10, spaceAfter=5, keepWithNext=1),
         "body": ParagraphStyle("body", fontName="Body", fontSize=10, leading=14.5, spaceAfter=6),
         "small": ParagraphStyle("small", fontName="Body", fontSize=8.5, leading=11.5,
                                 textColor=colors.HexColor("#44546a")),
@@ -266,7 +266,7 @@ def build():
         ["1. Uygulamanın yetenekleri<br/>2. Binance API anahtarı kurulumu<br/>3. Piyasa analizi nasıl okunur<br/>"
          "4. Teknik göstergeler<br/>5. Stratejiler (7 adet) ve hangi piyasada kullanılır<br/>6. Risk yönetimi<br/>"
          "7. Backtest metrikleri ve doğru strateji seçimi<br/>8. Önerilen çalışma akışı ve kontrol listesi<br/>"
-         "9. Sık karşılaşılan hatalar"],
+         "9. Telegram bildirimleri ve komutları<br/>10. Sık karşılaşılan hatalar"],
     ], [W * 0.7]))
     story.append(Spacer(1, 1.5 * cm))
     story.append(P("<b>Önemli uyarı:</b> Bu yazılım ve rehber yatırım tavsiyesi değildir. Hiçbir strateji kâr garantisi "
@@ -469,8 +469,49 @@ def build():
     story.append(P("Not: Bot, stop-loss ve kâr al seviyelerini kendisi izler ve piyasa emriyle kapatır; borsaya "
                    "bekleyen stop emri koymaz. Bu nedenle bot kapalıyken pozisyonlar korunmaz.", "warn"))
 
-    # ---------------- 9. Hatalar
-    story.append(P("9. Sık karşılaşılan hatalar", "h1"))
+    # ---------------- 9. Telegram
+    story.append(PageBreak())
+    story.append(P("9. Telegram bildirimleri ve komutları", "h1"))
+    story.append(P("KreatifBot, bot çalışırken olan her şeyi Telegram'a gönderebilir ve Telegram'dan komut alabilir. "
+                   "Kurulum <b>Telegram</b> sekmesinden yapılır."))
+    story.append(P("Kurulum", "h2"))
+    story.append(bullets([
+        "Telegram'da <b>@BotFather</b> ile konuşun, <b>/newbot</b> yazın; bota bir ad ve sonu <i>bot</i> ile biten "
+        "bir kullanıcı adı verin.",
+        "BotFather'ın verdiği <b>token</b>'ı (ör. 123456789:ABC...) Telegram sekmesine yapıştırın.",
+        "Telegram'da yeni botunuzu açıp <b>/start</b> yazın.",
+        "<b>Chat ID'yi otomatik bul</b> → <b>Test mesajı gönder</b> → <b>Kaydet</b>.",
+        "Botu Bot sekmesinden başlatın; bildirimler otomatik başlar.",
+    ]))
+    story.append(P("Gönderilen bildirimler", "h2"))
+    story.append(table([
+        ["Bildirim", "Örnek"],
+        ["Bot başlatıldı / durduruldu", "🟢 KreatifBot başlatıldı · Mod: KAĞIT · Strateji · Semboller".replace("🟢 ", "")],
+        ["AL / SAT sinyalleri", "AL sinyali — BTCUSDT · Fiyat · Mum zamanı · gerekçe"],
+        ["Alım", "ALIM — BTCUSDT · miktar @ fiyat · tutar · stop-loss · kâr al"],
+        ["Satım", "SATIŞ — BTCUSDT (Stop-loss / Kâr al / Strateji sinyali) · K/Z +12,40 USDT (+2,48%)"],
+        ["Risk uyarısı", "Günlük zarar limiti aşıldı — bugün yeni pozisyon açılmayacak"],
+        ["Hata / uyarı", "Bağlantı, bakiye, minimum işlem tutarı gibi sorunlar"],
+        ["Günlük özet", "Seçilen saatte: kapanan işlem sayısı, kazanan/kaybeden, gerçekleşen K/Z, toplam değer"],
+    ], [W * 0.28, W * 0.72]))
+    story.append(P("Ayrıca <b>Piyasa Analizi</b> ve <b>Tarayıcı</b> sekmelerindeki <b>Telegram'a gönder</b> butonlarıyla "
+                   "analiz ve tarama sonuçlarını tek tıkla paylaşabilirsiniz."))
+    story.append(P("Komutlar", "h2"))
+    story.append(table([
+        ["Komut", "Ne yapar?"],
+        ["/durum", "Bot durumu, mod, strateji, toplam değer, serbest bakiye, günlük K/Z"],
+        ["/pozisyonlar", "Açık pozisyonlar ve anlık kâr/zarar"],
+        ["/islemler", "Son 10 kapanmış işlem"],
+        ["/ozet", "Bugünün özeti"],
+        ["/durdur", "Botu uzaktan durdurur (açık pozisyonlar satılmaz)"],
+        ["/yardim", "Komut listesi"],
+    ], [W * 0.2, W * 0.8]))
+    story.append(P("Güvenlik: komutlar yalnızca kayıtlı Chat ID'den kabul edilir, başka kişilerden gelen mesajlar "
+                   "yok sayılır. Token bilgisayarınızda şifrelenerek saklanır. Token'ı kimseyle paylaşmayın; "
+                   "sızarsa BotFather'da <b>/revoke</b> ile yenileyin.", "tip"))
+
+    # ---------------- 10. Hatalar
+    story.append(P("10. Sık karşılaşılan hatalar", "h1"))
     story.append(table([
         ["Hata", "Neden", "Çözüm"],
         ["-2015 / -2014 Invalid API-key", "Anahtar yanlış, IP izni yok veya testnet/gerçek seçimi uyuşmuyor",
@@ -482,6 +523,9 @@ def build():
          "Sermayeyi veya işlem başı riski artırın"],
         ["-1121 Invalid symbol", "Sembol yanlış yazılmış", "BTCUSDT biçiminde, araya işaret koymadan yazın"],
         ["Bağlantı hatası", "İnternet / güvenlik duvarı / bölgesel kısıtlama", "Bağlantıyı ve erişimi kontrol edin"],
+        ["Telegram: Token geçersiz", "Token eksik/yanlış kopyalanmış", "BotFather'dan token'ı tekrar kopyalayın"],
+        ["Telegram: Sohbet bulunamadı", "Bota hiç /start yazılmamış veya Chat ID yanlış",
+         "Botu açıp /start yazın, Chat ID'yi otomatik bulun"],
     ], [W * 0.24, W * 0.36, W * 0.4]))
     story.append(Spacer(1, 10))
     story.append(P("KreatifBot · Bu belge uygulamayla birlikte otomatik üretilir (docs/generate_guide.py).", "small"))

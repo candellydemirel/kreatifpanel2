@@ -13,14 +13,15 @@ Binance Spot piyasası için piyasa analizi, tarama, backtest ve otomatik işlem
 | 🧪 **Backtest** | Seçilen stratejiyi 20.000 muma kadar geçmiş veride test eder (ücret + kayma dahil). Getiri, al-tut karşılaştırması, kazanma oranı, kâr faktörü, maks. düşüş, Sharpe, sermaye eğrisi ve işlem listesini gösterir. **Tüm Stratejileri Karşılaştır** ile hangisinin o paritede daha iyi çalıştığını görürsünüz. |
 | 🤖 **Bot** | Seçilen semboller için arka planda çalışır: sinyal gelince alır, stop-loss / kâr al / iz süren stop / strateji sinyaliyle satar. Kağıt (simülasyon) veya canlı mod. Pozisyonlar diske kaydedilir, uygulama yeniden açıldığında takibe devam edilir. |
 | ⚙ **Ayarlar** | API anahtarı, Testnet/gerçek hesap seçimi, bağlantı ve bakiye testi. |
+| 📨 **Telegram** | Sinyaller, alım/satım (K/Z ile), stop-loss/kâr al, hatalar, günlük zarar limiti ve günlük özet Telegram'a gelir. `/durum`, `/pozisyonlar`, `/islemler`, `/ozet`, `/durdur` komutları. Analiz ve tarama sonuçlarını tek tıkla gönderme. |
 | 🔑 **Binance API Anahtarı** (üst menü) | İlk açılışta otomatik çıkan, her zaman üst menüden açılabilen API giriş penceresi: anahtarı girin, **Bağlantıyı Test Et**, **Kaydet**. |
 | 📘 **Yardım → Strateji Rehberi (PDF)** | Uygulamaya gömülü Türkçe rehber: stratejiler, göstergeler, analiz skoru, risk yönetimi, backtest metrikleri, hata kodları. |
 
 ## 📘 Strateji ve Kullanım Rehberi (PDF)
-[`docs/KreatifBot_Strateji_Rehberi.pdf`](docs/KreatifBot_Strateji_Rehberi.pdf) — 10 sayfa:
+[`docs/KreatifBot_Strateji_Rehberi.pdf`](docs/KreatifBot_Strateji_Rehberi.pdf):
 uygulamanın yetenekleri, Binance API kurulumu, piyasa analizi skorunun nasıl okunacağı, 10 teknik gösterge,
 7 stratejinin AL/SAT koşulları ve hangi piyasada kullanılacağı (strateji seçim matrisi), pozisyon boyutu
-formülü ve örnek hesap, backtest metrikleri, canlıya geçiş kontrol listesi ve sık görülen Binance hata kodları.
+formülü ve örnek hesap, backtest metrikleri, canlıya geçiş kontrol listesi, Telegram kurulumu/komutları ve sık görülen hata kodları.
 
 Rehber koddan üretilir; strateji parametreleri ve risk varsayılanları her zaman uygulamayla aynıdır:
 `pip install reportlab && python docs/generate_guide.py`
@@ -65,6 +66,14 @@ Uygulamada üst menüdeki **🔑 Binance API Anahtarı** butonuna tıklayın (il
 - 🔒 **Para çekme iznini asla açmayın**, mümkünse IP kısıtlaması ekleyin.
 - Gizli anahtar bilgisayarınızda Windows DPAPI ile şifrelenmiş olarak saklanır: `%APPDATA%\KreatifBot\settings.json`.
 
+## 📨 Telegram bildirimleri
+1. Telegram'da **@BotFather** → `/newbot` → bota ad ve sonu `bot` ile biten kullanıcı adı verin, **token**'ı kopyalayın.
+2. Yeni botunuzu açıp **/start** yazın.
+3. Uygulamada **Telegram** sekmesi → token'ı yapıştırın → **Chat ID'yi otomatik bul** → **Test mesajı gönder** → bildirimleri etkinleştirip **Kaydet**.
+4. Botu başlattığınızda bildirimler gelir. Komutlar: `/durum`, `/pozisyonlar`, `/islemler`, `/ozet`, `/durdur`, `/yardim`.
+
+Komutlar yalnızca kayıtlı Chat ID'den kabul edilir. Token, API anahtarı gibi DPAPI ile şifrelenerek saklanır.
+
 ## Önerilen kullanım akışı
 1. **Tarayıcı** ile güçlü skorlu pariteleri bulun.
 2. **Piyasa Analizi**'nde detaylarına bakın.
@@ -97,6 +106,7 @@ kreatifbot/
   backtest.py               Backtest motoru ve metrikler
   broker.py                 Kağıt ve canlı emir yürütme
   engine.py                 Bot motoru (arka plan iş parçacığı)
+  telegram.py               Telegram bildirimleri ve komutlar
   config.py                 Ayarlar ve DPAPI ile anahtar şifreleme
   gui/                      PySide6 arayüzü
 tests/                      Birim, motor ve arayüz testleri
