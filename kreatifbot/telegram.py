@@ -42,7 +42,8 @@ HELP_TEXT = (
     "/islemler – son 10 işlem\n"
     "/ozet – bugünün özeti\n"
     "/durdur – botu durdurur (açık pozisyonlar satılmaz)\n"
-    "/yardim – bu mesaj"
+    "/yardim – bu mesaj\n\n"
+    "Manuel onay modunda (Ayarlar → İşlem onayı) her yeni işlem için Onayla / Reddet düğmeli mesaj gelir."
 )
 
 
@@ -91,16 +92,26 @@ class TelegramClient:
     def get_me(self) -> dict:
         return self.call("getMe")
 
-    def send_message(self, chat_id: str | int, text: str, html_mode: bool = True) -> dict:
+    def send_message(self, chat_id: str | int, text: str, html_mode: bool = True,
+                     reply_markup: dict | None = None) -> dict:
         if len(text) > MAX_LEN:
             text = text[: MAX_LEN - 20] + "\n…(kısaltıldı)"
         params = {"chat_id": chat_id, "text": text, "disable_web_page_preview": True}
         if html_mode:
             params["parse_mode"] = "HTML"
+        if reply_markup:
+            params["reply_markup"] = reply_markup
         return self.call("sendMessage", params)
 
+    def answer_callback(self, callback_id: str, text: str = "") -> None:
+        self.call("answerCallbackQuery", {"callback_query_id": callback_id, "text": text[:190]})
+
+    def remove_buttons(self, chat_id, message_id) -> None:
+        self.call("editMessageReplyMarkup", {"chat_id": chat_id, "message_id": message_id,
+                                             "reply_markup": {"inline_keyboard": []}})
+
     def get_updates(self, offset: int | None = None, timeout: int = 0) -> list:
-        params = {"timeout": timeout, "allowed_updates": ["message"]}
+        params = {"timeout": timeout, "allowed_updates": ["message", "callback_query"]}
         if offset is not None:
             params["offset"] = offset
         return self.call("getUpdates", params, timeout=timeout + 15)
@@ -145,7 +156,7 @@ class TelegramNotifier:
     def start(self):
         self._stop.clear()
         self._threads = [threading.Thread(target=self._sender, name="TelegramSender", daemon=True)]
-        if self.commands:
+        if self.commands or getattr(self.engine, "approvals", None) is not None:
             self._threads.append(threading.Thread(target=self._poller, name="TelegramPoller", daemon=True))
         for t in self._threads:
             t.start()
@@ -161,8 +172,8 @@ class TelegramNotifier:
     def running(self) -> bool:
         return any(t.is_alive() for t in self._threads)
 
-    def send(self, text: str):
-        self._queue.put(text)
+    def send(self, text: str, reply_markup: dict | None = None):
+        self._queue.put((text, reply_markup) if reply_markup else text)
 
     # ---------------------------------------------------------------- olaylar
     def handle_event(self, kind: str, payload=None):
@@ -171,6 +182,11 @@ class TelegramNotifier:
             text = self.format_event(kind, payload)
         except Exception:  # biçimlendirme hatası motoru etkilemesin
             logger.exception("Telegram olayı biçimlendirilemedi")
+            return
+        if kind == "approval_request" and text:
+            self.send(text, {"inline_keyboard": [[
+                {"text": "✅ Onayla", "callback_data": f"ap:{payload.request_id}:1"},
+                {"text": "❌ Reddet", "callback_data": f"ap:{payload.request_id}:0"}]]})
             return
         if text:
             self.send(text)
@@ -254,6 +270,11 @@ class TelegramNotifier:
             return text + "\n<i>Yatırım tavsiyesi değildir.</i>"
         if kind == "maintenance" and self.notify["status"]:
             return "🛠 " + esc(payload.summary()[:3000])
+        if kind == "approval_request":
+            return f"🟡 <b>İŞLEM ONAYI GEREKLİ</b>\n{esc(payload.summary())}\n\nOnaylamazsanız emir gönderilmez."
+        if kind == "approval_resolved":
+            from .intel.approval import STATE_TR
+            return f"ℹ️ {esc(payload.symbol)} onay isteği: {esc(STATE_TR.get(payload.state, payload.state))}"
         if kind == "halt" and self.notify["risk"]:
             return f"⛔ <b>Günlük zarar limiti aşıldı</b>\n{esc(payload)}\nBugün yeni pozisyon açılmayacak."
         if kind == "alert" and self.notify["errors"] and isinstance(payload, dict):
@@ -339,10 +360,11 @@ class TelegramNotifier:
         return "Bilinmeyen komut. /yardim yazın."
 
     # ---------------------------------------------------------------- iş parçacıkları
-    def _deliver(self, text: str) -> bool:
+    def _deliver(self, item) -> bool:
+        text, markup = item if isinstance(item, tuple) else (item, None)
         for attempt in range(3):
             try:
-                self.client.send_message(self.chat_id, text)
+                self.client.send_message(self.chat_id, text, reply_markup=markup)
                 self.sent_count += 1
                 return True
             except TelegramError as exc:
@@ -350,6 +372,33 @@ class TelegramNotifier:
                 if self._stop.wait(2 * (attempt + 1)):
                     break
         return False
+
+    def _handle_callback(self, cq: dict):
+        """Telegram'daki Onayla / Reddet düğmeleri (yalnızca yetkili sohbetten)."""
+        msg = cq.get("message") or {}
+        chat_id = str(msg.get("chat", {}).get("id"))
+        data = str(cq.get("data") or "")
+        if chat_id != self.chat_id or not data.startswith("ap:"):
+            try:
+                self.client.answer_callback(cq.get("id", ""), "Yetkisiz")
+            except TelegramError:
+                pass
+            return
+        try:
+            _, req_id, flag = data.split(":")
+        except ValueError:
+            return
+        e = self.engine
+        if e is None or not hasattr(e, "resolve_approval"):
+            reply = "Bot çalışmıyor; istek geçersiz."
+        else:
+            reply = e.resolve_approval(req_id, flag == "1", "Telegram")
+        try:
+            self.client.answer_callback(cq.get("id", ""), reply)
+            if msg.get("message_id"):
+                self.client.remove_buttons(chat_id, msg["message_id"])
+        except TelegramError as exc:
+            logger.warning("Telegram onay yanıtı gönderilemedi: %s", exc)
 
     def _check_summary(self):
         if not self.notify["daily_summary"]:
@@ -389,6 +438,9 @@ class TelegramNotifier:
                 continue
             for upd in updates:
                 offset = upd["update_id"] + 1
+                if upd.get("callback_query"):
+                    self._handle_callback(upd["callback_query"])
+                    continue
                 msg = upd.get("message") or {}
                 text = msg.get("text") or ""
                 if str(msg.get("chat", {}).get("id")) != self.chat_id or not text.startswith("/"):

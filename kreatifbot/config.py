@@ -116,6 +116,8 @@ class Settings:
     prevent_sleep: bool = True           # Bot çalışırken Windows uykuya geçmesin
     autostart: bool = False              # Windows açılınca uygulamayı başlat
     start_bot_on_launch: bool = False    # Uygulama açılınca botu otomatik başlat
+    trade_approval: str = "auto"         # auto: bot kendisi açar · manual: her yeni pozisyon için onay
+    approval_timeout_min: int = 10       # Onaylanmayan istek bu süre sonunda iptal olur
     unattended_live_confirmed: bool = False  # Canlı modda onaysız otomatik başlatmaya izin (bilinçli onay)
     cryptopanic_token: str = ""
     translate_email: str = ""            # İsteğe bağlı; yalnızca kullanıcı girerse MyMemory'ye gönderilir

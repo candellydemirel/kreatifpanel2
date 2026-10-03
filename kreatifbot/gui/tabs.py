@@ -934,11 +934,16 @@ class BotTab(QWidget):
                     universe = UniverseSelector(market_client, cfg.quote_asset, s.universe_size,
                                                 min_quote_volume=2_000_000 if all_mode else 20_000_000,
                                                 base_symbols=s.symbols, all_coins=all_mode)
+                approvals = None
+                if s.trade_approval == "manual":
+                    from ..intel.approval import ApprovalBook
+                    approvals = ApprovalBook(s.approval_timeout_min)
                 engine = IntelligentBotEngine(cfg, s.symbols, market_client, venue, store, futures_client=fut,
                                               decision_engine=de, poll_seconds=s.poll_seconds,
                                               state_path=self._state_path(live), on_event=on_event,
                                               news_monitor=news, insight_engine=insight_engine,
-                                              insight_store=insight_store, universe=universe)
+                                              insight_store=insight_store, universe=universe,
+                                              approvals=approvals)
             except ValueError as exc:
                 self.start_btn.setEnabled(True)
                 self.ctx.show_error("Zeka Motoru başlatılamadı", str(exc))
@@ -1115,6 +1120,27 @@ class SettingsTab(QWidget):
         help_text.setWordWrap(True)
         help_text.setTextFormat(Qt.TextFormat.RichText)
 
+        ap = QGroupBox("İşlem onayı")
+        apl = QFormLayout(ap)
+        self.approval = QComboBox()
+        self.approval.addItem("Otomatik — bot uygun fırsatta işlemi kendisi açar", "auto")
+        self.approval.addItem("Manuel — her yeni işlemden önce onayımı iste (uygulama + Telegram)", "manual")
+        idx = self.approval.findData(s.trade_approval)
+        self.approval.setCurrentIndex(idx if idx >= 0 else 0)
+        self.approval_timeout = QSpinBox()
+        self.approval_timeout.setRange(1, 120)
+        self.approval_timeout.setValue(s.approval_timeout_min)
+        self.approval_timeout.setSuffix(" dk")
+        apl.addRow("Yeni işlem açma", self.approval)
+        apl.addRow("Onay bekleme süresi", self.approval_timeout)
+        ap_note = QLabel("Manuel modda bot fırsat bulunca sorar; uygulamada bir pencere açılır ve Telegram'a "
+                         "Onayla/Reddet düğmeli mesaj gelir. Onay gelmezse süre sonunda işlem açılmaz. Onaydan sonra "
+                         "fiyat ve stop güncel verilerle yeniden kontrol edilir. Stop-loss ve kâr al gibi ÇIKIŞLAR "
+                         "güvenlik için her zaman otomatiktir. Değişiklik bot yeniden başlatılınca uygulanır.")
+        ap_note.setWordWrap(True)
+        ap_note.setStyleSheet("color:#8b949e;")
+        apl.addRow(ap_note)
+
         bg = QGroupBox("Arka planda çalışma (bu bilgisayar)")
         bgl = QVBoxLayout(bg)
         self.tray = QCheckBox("Pencere kapatılınca sistem tepsisinde çalışmaya devam et")
@@ -1139,6 +1165,7 @@ class SettingsTab(QWidget):
 
         layout = QVBoxLayout(self)
         layout.addWidget(box)
+        layout.addWidget(ap)
         layout.addWidget(bg)
         layout.addLayout(buttons)
         layout.addWidget(self.result)
@@ -1177,6 +1204,8 @@ class SettingsTab(QWidget):
         s.prevent_sleep = self.nosleep.isChecked()
         s.start_bot_on_launch = self.autobot.isChecked()
         s.unattended_live_confirmed = self.autolive.isChecked()
+        s.trade_approval = self.approval.currentData()
+        s.approval_timeout_min = self.approval_timeout.value()
         if self.autostart.isChecked() != s.autostart:
             from ..system import set_autostart
             if set_autostart(self.autostart.isChecked()) or not self.autostart.isChecked():

@@ -231,7 +231,39 @@ class MainWindow(QMainWindow):
         s = self.settings
         return BinanceClient(s.api_key, s.api_secret, testnet=s.testnet)
 
+    def _ask_approval(self, req):
+        """Manuel onay modunda uygulama içi onay penceresi (pencereyi bloklamaz)."""
+        from PySide6.QtWidgets import QMessageBox
+        boxes = self.__dict__.setdefault("_approval_boxes", {})
+        box = QMessageBox(QMessageBox.Icon.Question, "İşlem onayı gerekli",
+                          req.summary() + "\n\nBu işlem açılsın mı?", parent=self)
+        yes = box.addButton("✅ Onayla", QMessageBox.ButtonRole.YesRole)
+        box.addButton("❌ Reddet", QMessageBox.ButtonRole.NoRole)
+        box.setWindowModality(Qt.WindowModality.NonModal)
+
+        def done(_=None):
+            boxes.pop(req.request_id, None)
+            if box.clickedButton() is None:      # pencere kapatıldı: karar Telegram'dan verilebilir
+                return
+            engine = getattr(self.bot, "engine", None)
+            if engine is not None and hasattr(engine, "resolve_approval"):
+                self.status(engine.resolve_approval(req.request_id, box.clickedButton() is yes, "uygulama"))
+        box.finished.connect(done)
+        boxes[req.request_id] = box
+        box.show()
+        if self.isHidden() and self.tray is not None:
+            self.tray.showMessage("İşlem onayı gerekli", f"{req.direction} {req.symbol} — onaylamak için açın")
+
     def _route_event(self, kind: str, payload):
+        if kind == "approval_request":
+            self._ask_approval(payload)
+            return
+        if kind == "approval_resolved":
+            box = self.__dict__.get("_approval_boxes", {}).pop(payload.request_id, None)
+            if box is not None:
+                box.blockSignals(True)
+                box.close()
+            return
         if kind == "decision":
             self.intel_tab.on_live_decision(payload)
         elif kind == "news_polled":

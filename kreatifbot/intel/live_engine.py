@@ -53,7 +53,8 @@ class IntelligentBotEngine(EngineCore):
     def __init__(self, cfg: IntelConfig, symbols: list[str], market_client, venue, store: SignalStore | None,
                  futures_client=None, decision_engine: DecisionEngine | None = None, poll_seconds: float = 20,
                  state_path: str | Path | None = None, on_event=None, kline_limit: int = 600,
-                 btc_client=None, news_monitor=None, insight_engine=None, insight_store=None, universe=None):
+                 btc_client=None, news_monitor=None, insight_engine=None, insight_store=None, universe=None,
+                 approvals=None):
         self.cfg = cfg
         self.symbols = [s.strip().upper() for s in symbols if s.strip()]
         if not self.symbols:
@@ -65,6 +66,7 @@ class IntelligentBotEngine(EngineCore):
         if not_allowed:
             raise ValueError(f"İzin verilen sembol listesinde değil (Zeka Motoru ayarları): {', '.join(not_allowed)}")
         self.universe = universe              # otomatik coin seçimi (None → yalnızca elle girilen semboller)
+        self.approvals = approvals            # ApprovalBook → her yeni pozisyon için manuel onay; None → otomatik
         self.batch_size = 25                  # Her turda derin analiz edilen coin sayısı (sırayla döner)
         self._batch_pos = 0
         if cfg.timeframes.entry not in cfg.allowed_timeframes:
@@ -197,6 +199,50 @@ class IntelligentBotEngine(EngineCore):
             parts.append("Bot kurallarına uyan güvenli fırsat yokken işlem açmaz; bu normaldir.")
         self.log(" ".join(parts))
         self._summary_reset()
+
+    # ------------------------------------------------------------------ manuel onay
+    def _approval(self, key: str, make) -> bool | None:
+        """True: emir gönderilebilir · None: onay bekleniyor · False: reddedildi / süresi doldu."""
+        if self.approvals is None:
+            return True
+        from .approval import APPROVED, PENDING, STATE_TR
+        state, req, new = self.approvals.gate(key, make)
+        if new:
+            self.log(f"ONAY BEKLENİYOR: {req.direction} {req.symbol} ({req.strategy}) ~{req.notional:.2f} "
+                     f"{self.quote_asset}, stop {req.stop:.6g}. Uygulamadan veya Telegram'dan onaylayın "
+                     f"({req.minutes_left:.0f} dk).")
+            self._emit("approval_request", req)
+        if state == APPROVED:
+            return True
+        if state == PENDING:
+            return None
+        self.approvals.finish(key)
+        self.log(f"{req.symbol}: işlem açılmadı — {STATE_TR.get(state, state)}"
+                 + (f" ({req.resolved_by})" if req.resolved_by else ""))
+        self._emit("approval_resolved", req)
+        return False
+
+    def resolve_approval(self, request_id: str, approve: bool, by: str = "uygulama") -> str:
+        """Arayüz veya Telegram'dan gelen onay/ret (başka iş parçacığından çağrılabilir)."""
+        if self.approvals is None:
+            return "Onay modu kapalı."
+        ok, msg, req = self.approvals.resolve(request_id, approve, by)
+        if ok and req is not None:
+            self.log(f"{req.symbol}: {'ONAYLANDI' if approve else 'REDDEDİLDİ'} ({by}). "
+                     + ("Bir sonraki turda güncel fiyatla kontrol edilip emir gönderilecek." if approve else ""))
+            self._emit("approval_resolved", req)
+        return msg
+
+    def _approved_external_tick(self):
+        if self.approvals is None:
+            return
+        for req in self.approvals.approved_external():
+            try:
+                self._open_external(*req.payload)
+            except Exception as exc:  # noqa: BLE001
+                self.log(f"{req.symbol}: onaylı işlem açılamadı — {exc}", logging.WARNING)
+            finally:
+                self.approvals.finish(req.key)
 
     def _batch(self) -> list[str]:
         """Bu turda incelenecek coinler: açık pozisyon/bekleyen emirler her turda, kalanı sırayla."""
@@ -337,6 +383,7 @@ class IntelligentBotEngine(EngineCore):
                 self._news_tick()
             except Exception as exc:  # noqa: BLE001 - haber hatası ticareti durdurmamalı
                 self.log(f"Haber kontrolü hatası: {exc}", logging.WARNING)
+            self._approved_external_tick()
             try:
                 self._universe_tick()
             except Exception as exc:  # noqa: BLE001 - seçim hatası mevcut listeyle devam etsin
@@ -684,6 +731,16 @@ class IntelligentBotEngine(EngineCore):
         if not chk.ok:
             self.log(f"{symbol}: {strategy} emir ön kontrolü başarısız → {'; '.join(chk.errors)}", logging.WARNING)
             return False
+        if symbol in self.positions:
+            return False
+        args = (symbol, entry, stop, targets, fractions, strategy, explanation, reasons, risk_mult, stage,
+                max_concurrent, confidence, regime_label)
+        ok = self._approval(f"{strategy}:{symbol}", lambda: dict(
+            symbol=symbol, direction="LONG", strategy=strategy, price=price, qty=float(chk.qty),
+            notional=float(chk.qty) * price, stop=stop, targets=list(targets), confidence=confidence,
+            reason="; ".join(str(r) for r in list(reasons)[:2]), live=live, payload=args))
+        if not ok:
+            return False
         d = DecisionObject(signal_id=uuid.uuid4().hex[:16], symbol=symbol, market=self.market,
                            timeframe="1m" if strategy == "new_listing" else "1h", direction="LONG",
                            signal_status=SignalStatus.CONFIRMED.value, strategy=strategy, confidence=confidence,
@@ -750,6 +807,8 @@ class IntelligentBotEngine(EngineCore):
         now = datetime.now(timezone.utc)
         if d.signal_expiry and now > pd.Timestamp(d.signal_expiry).to_pydatetime():
             self.pending.pop(symbol, None)
+            if self.approvals is not None:
+                self.approvals.finish(d.signal_id)
             self.log(f"{symbol}: sinyal süresi doldu")
             self._status(d, SignalStatus.EXPIRED)
             return
@@ -775,6 +834,18 @@ class IntelligentBotEngine(EngineCore):
             self._status(d, SignalStatus.CANCELLED)
             self.log(f"{symbol}: emir ön kontrolü başarısız → {'; '.join(chk.errors)}", logging.WARNING)
             return
+        ok = self._approval(d.signal_id, lambda: dict(
+            symbol=symbol, direction=d.direction, strategy=d.strategy, price=price, qty=float(chk.qty),
+            notional=float(chk.qty) * price, stop=d.stop_loss, targets=list(d.take_profit_levels),
+            confidence=d.confidence, reason="; ".join(str(r) for r in d.reasons[:2]), live=bool(self.venue.is_live)))
+        if ok is None:
+            return                            # onay bekleniyor; sinyal bekleyen listede kalır
+        if ok is False:
+            self.pending.pop(symbol, None)
+            self._status(d, SignalStatus.CANCELLED)
+            return
+        if self.approvals is not None:
+            self.approvals.finish(d.signal_id)
         try:
             fill = self.venue.open(symbol, d.direction, float(chk.qty), price, rules, d.leverage, d.stop_loss)
         except (ExecutionError, BinanceAPIError) as exc:

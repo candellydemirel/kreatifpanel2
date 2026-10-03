@@ -468,3 +468,19 @@ def test_small_live_profile(app, window):
     assert all(0.1 <= sc.risk_multiplier <= 1.0 for sc in cfg.strategies.values())
     assert cfg.risk.max_open_positions == 3 and cfg.risk.require_probability_for_live
     assert window.news_tab.s_stage.currentData() == "FULL_LIVE"
+
+
+def test_approval_setting_and_dialog(app, window):
+    st = window.settings_tab
+    st.approval.setCurrentIndex(st.approval.findData("manual"))
+    st.approval_timeout.setValue(5)
+    st.save()
+    assert window.settings.trade_approval == "manual" and window.settings.approval_timeout_min == 5
+    from kreatifbot.intel.approval import ApprovalBook
+    book = ApprovalBook(5)
+    _, req, _ = book.gate("k", lambda: dict(symbol="SOLUSDT", direction="LONG", strategy="ema_trend", price=100,
+                                            qty=0.055, notional=5.5, stop=98, targets=[102, 104]))
+    window._route_event("approval_request", req)
+    assert req.request_id in window._approval_boxes
+    window._route_event("approval_resolved", req)
+    assert req.request_id not in window._approval_boxes
