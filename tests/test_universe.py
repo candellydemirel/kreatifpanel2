@@ -70,3 +70,29 @@ def test_live_readiness_warns_and_universe_switches_symbols(tmp_path):
     assert "gerçek emir AÇMAZ" in text and "Fonlama cüzdanından" in text
     eng._universe_tick()
     assert eng.symbols[0] == "BTCUSDT" and len(eng.symbols) == 4 and "PEPEUSDT" in eng.symbols
+
+
+def test_engine_logs_plain_summary(tmp_path):
+    from types import SimpleNamespace
+
+    from kreatifbot.intel.config import OLD_DEFAULT_TIMEFRAMES, config_from_dict
+    from kreatifbot.intel.execution import PaperVenue
+    from kreatifbot.intel.live_engine import IntelligentBotEngine
+
+    from .conftest import make_ohlcv
+    from .test_intel import FakeMarket, cfg_1h
+
+    cfg = cfg_1h()
+    logs = []
+    eng = IntelligentBotEngine(cfg, ["BTCUSDT"], FakeMarket(make_ohlcv(300)), PaperVenue("SPOT", 1000, cfg), None,
+                               state_path=tmp_path / "s.json",
+                               on_event=lambda k, p: logs.append(str(p)) if k == "log" else None)
+    nt = SimpleNamespace(symbol="SOLUSDT", is_trade=False, no_trade_reasons=["EDGE_BELOW_COSTS"],
+                         long_score=float("nan"), short_score=40.0)
+    eng._summary_add(nt)
+    eng._summary_add(SimpleNamespace(**{**nt.__dict__, "long_score": 63.0, "no_trade_reasons": ["LOW_CONFIDENCE"]}))
+    eng._summary_maybe_log()
+    text = "\n".join(logs)
+    assert "ilk tarama" in text and "Avantaj maliyetin altında" in text and "SOLUSDT LONG (alış) 63/100" in text
+    # eski varsayılan zaman dilimleri yeni varsayılana taşınır
+    assert config_from_dict({"timeframes": OLD_DEFAULT_TIMEFRAMES}).timeframes.entry == "15m"

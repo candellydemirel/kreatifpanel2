@@ -41,6 +41,14 @@ from .types import ExitReason, Regime, SignalStatus
 logger = logging.getLogger("kreatifbot.intel.live")
 
 
+def _finite(x) -> float:
+    try:
+        x = float(x)
+    except (TypeError, ValueError):
+        return 0.0
+    return x if x == x and abs(x) != float("inf") else 0.0
+
+
 class IntelligentBotEngine(EngineCore):
     def __init__(self, cfg: IntelConfig, symbols: list[str], market_client, venue, store: SignalStore | None,
                  futures_client=None, decision_engine: DecisionEngine | None = None, poll_seconds: float = 20,
@@ -101,6 +109,9 @@ class IntelligentBotEngine(EngineCore):
         self._last_insight_scan = 0.0
         self._tradable_bases: set = set()
         self.metas: dict = {}
+        self.summary_every_s = 900
+        self._summary_reset()
+        self._last_summary = 0.0
         self.maintenance_result = None
         self._maint_thread = None
         self._load_state()
@@ -142,6 +153,48 @@ class IntelligentBotEngine(EngineCore):
             self.log(f"UYARI: Binance {where} cüzdanınızda serbest {self.quote_asset} {free:.2f} → bot alım "
                      f"yapamaz (Binance'in en küçük emir tutarı ~5-10 {self.quote_asset}). Binance'te "
                      f"{self.quote_asset}'yi Fonlama cüzdanından {where} cüzdanına aktarın.", logging.WARNING)
+
+    # ------------------------------------------------------------------ kullanıcıya özet
+    def _summary_reset(self):
+        from collections import Counter
+        self._sum_n = 0
+        self._sum_trades = 0
+        self._sum_reasons = Counter()
+        self._sum_symbols: set = set()
+        self._sum_best = None
+
+    def _summary_add(self, d):
+        self._sum_n += 1
+        self._sum_symbols.add(d.symbol)
+        if d.is_trade:
+            self._sum_trades += 1
+            return
+        for r in d.no_trade_reasons[:1]:
+            self._sum_reasons[r] += 1
+        ls, ss = _finite(d.long_score), _finite(d.short_score)
+        score = max(ls, ss)
+        if self._sum_best is None or score > self._sum_best[1]:
+            side = "LONG" if ls >= ss else "SHORT"
+            self._sum_best = (d.symbol, score, side, d.no_trade_reasons[0] if d.no_trade_reasons else "")
+
+    def _summary_maybe_log(self):
+        if not self._sum_n or time.time() - self._last_summary < self.summary_every_s:
+            return
+        first = self._last_summary == 0
+        self._last_summary = time.time()
+        span = "ilk tarama" if first else f"son ~{max(1, round(self.summary_every_s / 60))} dk"
+        parts = [f"Özet ({span}): {len(self._sum_symbols)} coin için {self._sum_n} analiz, "
+                 f"{self._sum_trades} işlem sinyali."]
+        if self._sum_reasons:
+            parts.append("İşlem açılmama nedenleri: " + ", ".join(
+                f"{tr(k)} ({v})" for k, v in self._sum_reasons.most_common(3)) + ".")
+        if self._sum_best is not None:
+            sym, score, side, why = self._sum_best
+            parts.append(f"En yakın aday: {sym} {tr(side)} {score:.0f}/100" + (f" — {tr(why)}" if why else "") + ".")
+        if not self._sum_trades:
+            parts.append("Bot kurallarına uyan güvenli fırsat yokken işlem açmaz; bu normaldir.")
+        self.log(" ".join(parts))
+        self._summary_reset()
 
     def _universe_tick(self):
         if self.universe is None or not self.universe.due():
@@ -280,6 +333,7 @@ class IntelligentBotEngine(EngineCore):
                     self.log(f"{symbol}: beklenmeyen hata - {exc}", logging.ERROR)
                     logger.exception("intel tick")
             self._update_equity()
+            self._summary_maybe_log()
 
     def _process(self, symbol: str):
         cfg = self.cfg
@@ -401,6 +455,7 @@ class IntelligentBotEngine(EngineCore):
                 self.log(f"Veritabanı hatası: {exc} → yeni emir gönderilmeyecek", logging.ERROR)
                 return
         self.last_decisions[symbol] = d
+        self._summary_add(d)
         self._emit("decision", d)
         sig_text = {"LONG": "AL", "SHORT": "SAT"}.get(d.direction, "BEKLE") if d.is_trade else "BEKLE"
         self.last_signals[symbol] = {

@@ -20,12 +20,16 @@ from .types import LifecycleStage
 logger = logging.getLogger("kreatifbot.intel.config")
 
 
+CONFIG_REV = 2
+
 @dataclass
 class TimeframeRoles:
-    entry: str = "5m"
-    confirmation: str = "15m"
-    trend: str = "1h"
-    major: str = "4h"
+    # 15m giriş: spot komisyon + spread + kayma (~%0.3 gidiş-dönüş) 5m mumlarda hedefin büyük kısmını
+    # yiyordu; 15m'de hareketler maliyete göre daha büyük, bakım için de daha uzun geçmiş (≈31 gün) sağlar.
+    entry: str = "15m"
+    confirmation: str = "1h"
+    trend: str = "4h"
+    major: str = "12h"
     macro: str = "1d"
 
     def as_dict(self) -> dict[str, str]:
@@ -279,6 +283,7 @@ class AutopilotConfig:
 
 @dataclass
 class IntelConfig:
+    config_rev: int = CONFIG_REV         # Ayar dosyası sürümü (eski varsayılanları güncellemek için)
     market: str = "SPOT"                 # SPOT | USDM_FUTURES
     quote_asset: str = "USDT"
     allowed_symbols: list = field(default_factory=lambda: ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT"])
@@ -374,8 +379,15 @@ def _build(cls, data):
     return obj
 
 
+OLD_DEFAULT_TIMEFRAMES = {"entry": "5m", "confirmation": "15m", "trend": "1h", "major": "4h", "macro": "1d"}
+
+
 def config_from_dict(data: dict) -> IntelConfig:
-    return _build(IntelConfig, data or {})
+    data = dict(data or {})
+    if int(data.get("config_rev", 1) or 1) < 2 and data.get("timeframes") == OLD_DEFAULT_TIMEFRAMES:
+        data.pop("timeframes")           # kullanıcı değiştirmediyse yeni varsayılan zaman dilimleri
+    data["config_rev"] = CONFIG_REV
+    return _build(IntelConfig, data)
 
 
 def config_path() -> Path:
