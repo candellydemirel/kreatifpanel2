@@ -10,6 +10,7 @@ pip install -r requirements-dev.txt || goto :error
 python -m pytest -q || goto :error
 pyinstaller --noconfirm --clean --onefile --windowed --name KreatifBot ^
   --exclude-module PyQt5 --exclude-module PyQt6 --exclude-module tkinter --exclude-module matplotlib ^
+  --add-data "docs/KreatifBot_Strateji_Rehberi.pdf;docs" ^
   main.py || goto :error
 echo.
 echo Derleme tamamlandi: dist\KreatifBot.exe

@@ -807,6 +807,13 @@ class SettingsTab(QWidget):
         layout.addWidget(self.balances, 1)
         layout.addWidget(help_text)
 
+    def reload(self):
+        """API penceresinden yapılan değişiklikleri alanlara yansıt."""
+        s = self.ctx.settings
+        self.api_key.setText(s.api_key)
+        self.api_secret.setText(s.api_secret)
+        self.testnet.setChecked(s.testnet)
+
     @Slot()
     def save(self):
         s = self.ctx.settings

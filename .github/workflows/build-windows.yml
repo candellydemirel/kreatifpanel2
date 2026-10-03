@@ -32,6 +32,7 @@ jobs:
         run: >
           pyinstaller --noconfirm --clean --onefile --windowed --name KreatifBot
           --exclude-module PyQt5 --exclude-module PyQt6 --exclude-module tkinter --exclude-module matplotlib
+          --add-data "docs/KreatifBot_Strateji_Rehberi.pdf;docs"
           main.py
 
       - name: EXE açılış testi
@@ -46,13 +47,17 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: KreatifBot-windows
-          path: dist/KreatifBot.exe
+          path: |
+            dist/KreatifBot.exe
+            docs/KreatifBot_Strateji_Rehberi.pdf
           retention-days: 30
 
       - name: Sürüm yayınla (v* etiketi)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/KreatifBot.exe
+          files: |
+            dist/KreatifBot.exe
+            docs/KreatifBot_Strateji_Rehberi.pdf
     permissions:
       contents: write

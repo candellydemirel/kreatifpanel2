@@ -13,6 +13,17 @@ Binance Spot piyasası için piyasa analizi, tarama, backtest ve otomatik işlem
 | 🧪 **Backtest** | Seçilen stratejiyi 20.000 muma kadar geçmiş veride test eder (ücret + kayma dahil). Getiri, al-tut karşılaştırması, kazanma oranı, kâr faktörü, maks. düşüş, Sharpe, sermaye eğrisi ve işlem listesini gösterir. **Tüm Stratejileri Karşılaştır** ile hangisinin o paritede daha iyi çalıştığını görürsünüz. |
 | 🤖 **Bot** | Seçilen semboller için arka planda çalışır: sinyal gelince alır, stop-loss / kâr al / iz süren stop / strateji sinyaliyle satar. Kağıt (simülasyon) veya canlı mod. Pozisyonlar diske kaydedilir, uygulama yeniden açıldığında takibe devam edilir. |
 | ⚙ **Ayarlar** | API anahtarı, Testnet/gerçek hesap seçimi, bağlantı ve bakiye testi. |
+| 🔑 **Binance API Anahtarı** (üst menü) | İlk açılışta otomatik çıkan, her zaman üst menüden açılabilen API giriş penceresi: anahtarı girin, **Bağlantıyı Test Et**, **Kaydet**. |
+| 📘 **Yardım → Strateji Rehberi (PDF)** | Uygulamaya gömülü Türkçe rehber: stratejiler, göstergeler, analiz skoru, risk yönetimi, backtest metrikleri, hata kodları. |
+
+## 📘 Strateji ve Kullanım Rehberi (PDF)
+[`docs/KreatifBot_Strateji_Rehberi.pdf`](docs/KreatifBot_Strateji_Rehberi.pdf) — 10 sayfa:
+uygulamanın yetenekleri, Binance API kurulumu, piyasa analizi skorunun nasıl okunacağı, 10 teknik gösterge,
+7 stratejinin AL/SAT koşulları ve hangi piyasada kullanılacağı (strateji seçim matrisi), pozisyon boyutu
+formülü ve örnek hesap, backtest metrikleri, canlıya geçiş kontrol listesi ve sık görülen Binance hata kodları.
+
+Rehber koddan üretilir; strateji parametreleri ve risk varsayılanları her zaman uygulamayla aynıdır:
+`pip install reportlab && python docs/generate_guide.py`
 
 ### Stratejiler
 - **Akıllı Kombine (önerilen):** ADX ile piyasa rejimini ölçer; trend piyasasında EMA, MACD ve Supertrend'e, yatay piyasada RSI ve Bollinger'e daha çok ağırlık verir. Güçlü düşüş trendinde alım yapmaz.
@@ -47,6 +58,8 @@ Tüm parametreler arayüzden değiştirilebilir. Sinyaller yalnızca **kapanmı�
 `build_exe.bat` dosyasını çalıştırın. Sonuç: `dist\KreatifBot.exe`.
 
 ## Binance API anahtarı
+Uygulamada üst menüdeki **🔑 Binance API Anahtarı** butonuna tıklayın (ilk açılışta otomatik açılır) veya **Ayarlar** sekmesini kullanın.
+
 - **Testnet (önce bunu deneyin):** https://testnet.binance.vision → GitHub ile giriş → *Generate HMAC_SHA256 Key*. Ayarlar'da **Testnet kullan** işaretli olmalı.
 - **Gerçek hesap:** Binance → Profil → **API Yönetimi** → API oluştur. Yalnızca **Okuma** ve **Spot ve Marjin İşlemi** izinlerini açın.
 - 🔒 **Para çekme iznini asla açmayın**, mümkünse IP kısıtlaması ekleyin.

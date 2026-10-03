@@ -35,7 +35,7 @@ def main() -> int:
 
     sys.excepthook = excepthook
 
-    window = MainWindow()
+    window = MainWindow(prompt_api=not self_test)
     window.show()
     if self_test:
         QTimer.singleShot(1500, app.quit)

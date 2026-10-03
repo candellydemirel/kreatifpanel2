@@ -13,6 +13,7 @@ from pathlib import Path
 from .risk import RiskSettings
 
 APP_NAME = "KreatifBot"
+GUIDE_PDF = "docs/KreatifBot_Strateji_Rehberi.pdf"
 logger = logging.getLogger("kreatifbot.config")
 
 
@@ -27,6 +28,12 @@ def data_dir() -> Path:
         path = Path(override)
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def resource_path(relative: str) -> Path:
+    """Uygulamayla birlikte gelen dosyanın yolu (PyInstaller EXE içinde de çalışır)."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    return base / relative
 
 
 # ---------------------------------------------------------------------- şifreleme

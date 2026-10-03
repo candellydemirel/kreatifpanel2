@@ -128,3 +128,32 @@ def test_settings_save(app, window):
     s = load_settings()
     assert s.api_key == "abc" and s.testnet is False
     assert "GERÇEK" in window.net_badge.text()
+
+
+def test_api_dialog_saves_keys(app, window):
+    from kreatifbot.config import load_settings
+    from kreatifbot.gui.api_dialog import ApiKeyDialog
+    dialog = ApiKeyDialog(window, first_run=True)
+    dialog.api_key.setText("  KEY123 ")
+    dialog.api_secret.setText("SECRET456")
+    dialog.testnet.setChecked(True)
+    dialog.save_and_close()
+    s = load_settings()
+    assert (s.api_key, s.api_secret, s.testnet) == ("KEY123", "SECRET456", True)
+    assert window.settings_tab.api_key.text() == "KEY123"  # Ayarlar sekmesi de güncellendi
+    assert "TESTNET" in window.net_badge.text()
+
+
+def test_api_dialog_requires_both_keys(app, window):
+    from kreatifbot.gui.api_dialog import ApiKeyDialog
+    dialog = ApiKeyDialog(window)
+    dialog.api_key.setText("only-key")
+    dialog.api_secret.setText("")
+    dialog.test()
+    assert "doldurun" in dialog.result.text()
+
+
+def test_guide_pdf_bundled():
+    from kreatifbot.config import GUIDE_PDF, resource_path
+    path = resource_path(GUIDE_PDF)
+    assert path.exists() and path.read_bytes()[:4] == b"%PDF"

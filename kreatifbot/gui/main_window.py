@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, Qt, Signal
-from PySide6.QtGui import QColor, QPalette
+from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QAction, QColor, QDesktopServices, QPalette
 from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QMessageBox, QStyleFactory, QTabWidget
 
 from .. import __version__
 from ..binance_client import BinanceClient
-from ..config import Settings, data_dir, load_settings, save_settings
+from ..config import GUIDE_PDF, Settings, data_dir, load_settings, resource_path, save_settings
+from .api_dialog import ApiKeyDialog
 from .tabs import AnalysisTab, BacktestTab, BotTab, ScannerTab, SettingsTab
 from .widgets import TaskRunner
 
@@ -49,7 +50,7 @@ def apply_dark_theme(app: QApplication):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, prompt_api: bool = False):
         super().__init__()
         self.setWindowTitle(f"KreatifBot {__version__} — Binance Trading Bot")
         self.resize(1440, 900)
@@ -74,10 +75,43 @@ class MainWindow(QMainWindow):
 
         self.net_badge = QLabel()
         self.statusBar().addPermanentWidget(self.net_badge)
+        self._build_menu()
         self.settings_changed()
         self.status(f"Hazır. Veri klasörü: {data_dir()}")
-        if not self.settings.api_key:
-            self.tabs.setCurrentWidget(self.settings_tab)
+        if prompt_api and not self.settings.api_key:
+            QTimer.singleShot(400, lambda: self.open_api_dialog(first_run=True))
+
+    def _build_menu(self):
+        bar = self.menuBar()
+        api = QAction("🔑  Binance API Anahtarı", self)
+        api.triggered.connect(lambda: self.open_api_dialog())
+        bar.addAction(api)
+        help_menu = bar.addMenu("Yardım")
+        guide = QAction("📘  Strateji ve Kullanım Rehberi (PDF)", self)
+        guide.triggered.connect(self.open_guide)
+        folder = QAction("📂  Veri / kayıt klasörünü aç", self)
+        folder.triggered.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(data_dir()))))
+        about = QAction("Hakkında", self)
+        about.triggered.connect(lambda: QMessageBox.about(
+            self, "KreatifBot", f"<b>KreatifBot {__version__}</b><br>Binance Spot analiz, backtest ve trading botu."
+            "<br><br>Yatırım tavsiyesi değildir. Kripto işlemleri yüksek risk içerir."))
+        for action in (guide, folder, about):
+            help_menu.addAction(action)
+
+    def open_api_dialog(self, first_run: bool = False):
+        if self._bot_running:
+            self.show_error("Bot çalışıyor", "API anahtarını değiştirmek için önce botu durdurun.")
+            return
+        dialog = ApiKeyDialog(self, first_run)
+        dialog.open()
+        self._api_dialog = dialog
+
+    def open_guide(self):
+        path = resource_path(GUIDE_PDF)
+        if not path.exists():
+            self.show_error("Rehber bulunamadı", str(path))
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     # ---------------------------------------------------------------- bağlam
     def data_client(self) -> BinanceClient:
@@ -105,6 +139,7 @@ class MainWindow(QMainWindow):
             self.net_badge.setText("  GERÇEK HESAP  ")
             self.net_badge.setStyleSheet("background:#b62324; color:white; border-radius:3px;")
         self.bot.refresh_network_label()
+        self.settings_tab.reload()
 
     def status(self, message: str):
         self.statusBar().showMessage(message, 15000)
