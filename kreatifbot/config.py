@@ -106,6 +106,9 @@ class Settings:
     paper_balance: float = 1000.0
     poll_seconds: int = 30
     live_mode: bool = False
+    engine_type: str = "classic"         # classic | intel
+    intel_market: str = "SPOT"           # SPOT | USDM_FUTURES
+    intel_leverage: int = 1
     telegram_enabled: bool = False
     telegram_token: str = ""
     telegram_chat_id: str = ""

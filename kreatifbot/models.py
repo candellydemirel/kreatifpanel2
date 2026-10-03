@@ -44,10 +44,16 @@ class ClosedTrade:
     closed_at: str
     reason: str
     strategy: str = ""
+    side: str = "LONG"
+    exit_reason: str = ""          # Zeka motoru çıkış kodu (TP_HIT, SL_HIT, ...)
+    r_multiple: float = 0.0
+    gross_pnl: float = 0.0
+    fees: float = 0.0
+    signal_id: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, d: dict) -> "ClosedTrade":
-        return cls(**d)
+        return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})

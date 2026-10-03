@@ -250,6 +250,73 @@ INDICATORS = [
 ]
 
 
+def intel_section(story, W):
+    from kreatifbot.intel.config import IntelConfig
+    from kreatifbot.intel.strategies import REGISTRY
+    ic = IntelConfig()
+    story.append(PageBreak())
+    story.append(P("11. Zeka Motoru (Trading Intelligence Engine)", "h1"))
+    story.append(P("Zeka Motoru yalnızca AL/SAT üretmez: Binance Spot ve USDⓈ-M Futures verileriyle piyasa rejimini "
+                   "sınıflandırır, birden fazla stratejiyi birleştirir, sinyal güvenini hesaplar, giriş/SL/TP ve "
+                   "pozisyon süresini dinamik belirler, pozisyonu yönetir ve her kararı açıklar. Gerektiğinde "
+                   "<b>NO TRADE</b> der; amaç çok sinyal değil, ölçülebilir ve risk kontrollü fırsatlardır."))
+    story.append(P("Karar akışı", "h2"))
+    story.append(table([
+        ["Adım", "Ne yapılır?"],
+        ["1. Veri kalitesi", "Eksik/tekrarlanan mum, zaman boşluğu, bayat veri, geçersiz OHLC, yetersiz geçmiş, anormal "
+                             "spread/hacim, bayat order book, sembol durumu. Kritik sorun → NO TRADE "
+                             "(DATA_QUALITY_FAILURE)."],
+        ["2. Özellikler", "Trend, momentum, volatilite, hacim, order flow (taker delta/CVD), istatistik, piyasa yapısı, "
+                          "mum formasyonları; futures funding/OI/long-short/taker ayrı sütunlarda ve kaynak etiketli. "
+                          "Veri yoksa UNAVAILABLE, sahte değer yok."],
+        ["3. Rejim", "STRONG_BULL, BULL, WEAK_BULL, SIDEWAYS, CHOP, LOW/HIGH_VOLATILITY, BEAR, STRONG_BEAR, PANIC, "
+                     "UNKNOWN. BTC trendi, funding ve OI bağlam olarak düzeltir."],
+        ["4. Yönlendirici", "Rejime uygun stratejiler aktif olur. PANIC/UNKNOWN: yeni işlem yok. HIGH_VOLATILITY: "
+                           "daha yüksek eşik ve yarım boyut. Güçlü trendde ortalamaya dönüş kapalı."],
+        ["5. Aday sinyaller", "33 bağımsız strateji yalnızca aday üretir; formasyonlar ve order flow tek başına işlem "
+                              "açtırmaz."],
+        ["6. Skor", "LONG ve SHORT ayrı 0-100. Gruplar: trend, momentum, hacim, volatilite, yapı, MTF, order flow, "
+                    "OI/funding, AI. Aynı bilgi kaynağı tek sayılır (çifte sayım yok). İki yön de güçlü → CONFLICT."],
+        ["7. MTF", f"Varsayılan: giriş {ic.timeframes.entry}, onay {ic.timeframes.confirmation}, trend "
+                   f"{ic.timeframes.trend}, ana {ic.timeframes.major}, makro {ic.timeframes.macro}. Üst zaman "
+                   "dilimleri ters ise güven düşer veya NO TRADE."],
+        ["8. Meta model", "Birincil sinyalin başarı olasılığını tahmin eder (triple-barrier etiketli, purged "
+                          "eğitim). Eşik altı → NO TRADE. AI risk limitlerini değiştiremez."],
+        ["9. Seviyeler", "ATR/swing/yapı/Chandelier/Supertrend stop; R:R, yapı, Fibonacci, AI hedefleri; çoklu TP, "
+                         "breakeven, kâr kilidi, trailing (stop asla geri gitmez)."],
+        ["10. Maliyet & EV", "Maker/taker ücreti, spread, kayma, funding, gecikme. Beklenen değer maliyetler sonrası "
+                             "negatifse NO TRADE."],
+        ["11. Risk", "Risk tabanlı boyut, maruziyet, korelasyonlu maruziyet, günlük zarar, maksimum düşüş, art arda "
+                     "kayıp, devre kesici, futures tasfiye fiyatı stop'tan önce gelmemeli."],
+    ], [W * 0.2, W * 0.8]))
+    story.append(P("Stratejiler (33)", "h2"))
+    rows = [["Strateji", "Aile", "Stil", "Tercih edilen rejimler (LONG; SHORT aynalanır)"]]
+    for key, cls in REGISTRY.items():
+        rows.append([f"{cls.spec.name}", cls.spec.family, cls.spec.style,
+                     ", ".join(sorted(r.value for r in cls.spec.preferred))])
+    story.append(table(rows, [W * 0.3, W * 0.14, W * 0.11, W * 0.45]))
+    story.append(P("Futures verisi gerektiren stratejiler (OI, funding, tasfiye) veri yoksa çalışmaz. Binance geçmiş "
+                   "tasfiye verisini REST ile sunmadığı için Tasfiye Dönüşü stratejisi varsayılan olarak veri bekler.",
+                   "small"))
+    story.append(P("Araştırma ve doğrulama", "h2"))
+    story.append(bullets([
+        "<b>Walk-forward</b>: eğitim → doğrulama → örneklem dışı test; yalnızca test sonuçları raporlanır.",
+        "<b>Sağlamlık</b>: parametre pertürbasyonu, eşik duyarlılığı, ücret/kayma stresi, Monte Carlo, rejim ve dönem "
+        "ayrımı. Tek parametre kombinasyonunda çalışan strateji sağlam sayılmaz.",
+        "<b>Ablasyon</b>: RSI, MACD, hacim, OI, funding, CVD, VWAP, ADX, MTF, AI tek tek çıkarılıp katkı ölçülür.",
+        "<b>Kalibrasyon</b>: tahmin edilen olasılık ile gerçekleşen sonuç karşılaştırılır (Brier, ECE).",
+        "<b>Tutma süresi</b>: strateji bazında p25/medyan/p75/p90; dikey bariyer araştırma sonucundan belirlenir.",
+        "<b>Çıkış/giriş optimizasyonu</b>: örneklem içi ve dışı ayrı raporlanır.",
+    ]))
+    story.append(P("Strateji yaşam döngüsü", "h2"))
+    story.append(P("RESEARCH → BACKTEST → WALK_FORWARD → PAPER → SHADOW → LIMITED_LIVE (yarım risk) → FULL_LIVE. "
+                   "Varsayılan aşama PAPER'dır; canlı işlem yalnızca LIMITED_LIVE ve FULL_LIVE stratejilerle yapılır. "
+                   "Performans bozulursa strateji DEGRADED/PAUSED olur."))
+    story.append(P("Canlı güvenlik: AI yoksa deterministik mod (ayara göre NO TRADE); piyasa verisi, sembol filtreleri, "
+                   "veritabanı veya Binance API sorunu varsa yeni emir gönderilmez. Futures canlıda borsa tarafında "
+                   "koruyucu STOP_MARKET konur. Backtest sonucu canlı performans garantisi değildir.", "warn"))
+
+
 def build():
     global S
     register_fonts()
@@ -266,7 +333,8 @@ def build():
         ["1. Uygulamanın yetenekleri<br/>2. Binance API anahtarı kurulumu<br/>3. Piyasa analizi nasıl okunur<br/>"
          "4. Teknik göstergeler<br/>5. Stratejiler (7 adet) ve hangi piyasada kullanılır<br/>6. Risk yönetimi<br/>"
          "7. Backtest metrikleri ve doğru strateji seçimi<br/>8. Önerilen çalışma akışı ve kontrol listesi<br/>"
-         "9. Telegram bildirimleri ve komutları<br/>10. Sık karşılaşılan hatalar"],
+         "9. Telegram bildirimleri ve komutları<br/>10. Sık karşılaşılan hatalar<br/>"
+         "11. Zeka Motoru (Trading Intelligence Engine)"],
     ], [W * 0.7]))
     story.append(Spacer(1, 1.5 * cm))
     story.append(P("<b>Önemli uyarı:</b> Bu yazılım ve rehber yatırım tavsiyesi değildir. Hiçbir strateji kâr garantisi "
@@ -527,6 +595,7 @@ def build():
         ["Telegram: Sohbet bulunamadı", "Bota hiç /start yazılmamış veya Chat ID yanlış",
          "Botu açıp /start yazın, Chat ID'yi otomatik bulun"],
     ], [W * 0.24, W * 0.36, W * 0.4]))
+    intel_section(story, W)
     story.append(Spacer(1, 10))
     story.append(P("KreatifBot · Bu belge uygulamayla birlikte otomatik üretilir (docs/generate_guide.py).", "small"))
 

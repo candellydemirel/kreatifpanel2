@@ -17,6 +17,27 @@ Binance Spot piyasası için piyasa analizi, tarama, backtest ve otomatik işlem
 | 🔑 **Binance API Anahtarı** (üst menü) | İlk açılışta otomatik çıkan, her zaman üst menüden açılabilen API giriş penceresi: anahtarı girin, **Bağlantıyı Test Et**, **Kaydet**. |
 | 📘 **Yardım → Strateji Rehberi (PDF)** | Uygulamaya gömülü Türkçe rehber: stratejiler, göstergeler, analiz skoru, risk yönetimi, backtest metrikleri, hata kodları. |
 
+## 🧠 Zeka Motoru (Trading Intelligence Engine)
+Binance Spot ve USDⓈ-M Futures verileriyle çalışan çok katmanlı karar motoru. Klasik bot korunmuştur; Bot sekmesinde **Motor: Zeka Motoru** seçilerek kullanılır.
+
+| Katman | İçerik |
+|---|---|
+| Piyasa verisi | Spot: exchangeInfo, ticker, 24s ticker, klines, trades, aggTrades, order book, bookTicker. Futures: klines, mark/index fiyatı, funding (anlık+geçmiş), OI (anlık+geçmiş), long/short oranı, taker alış/satış hacmi, order book, bookTicker. Her değer kaynak etiketli; veri yoksa **UNAVAILABLE** (tasfiye verisi Binance REST'te yok). |
+| Sembol motoru | tickSize, stepSize, minQty, maxQty, minNotional, fiyat/miktar hassasiyeti, işlem durumu; emir öncesi filtre uygulama. |
+| Veri kalitesi | Eksik/tekrar mum, boşluk, bayat veri, geçersiz OHLC, yetersiz geçmiş, anormal spread/hacim, bayat order book → `DATA_QUALITY_FAILURE`. |
+| Göstergeler | EMA/SMA 9-200, VWAP, anchored VWAP, ADX/DI, SuperTrend, PSAR, Ichimoku, RSI, StochRSI, Stokastik, MACD, ROC, Momentum, CCI, Williams %R, MFI, ATR/ATR%, Bollinger (+genişlik), Keltner, tarihsel/gerçekleşen volatilite, volatilite yüzdeliği, RVOL, hacim ivmesi, OBV, delta/CVD, z-score. |
+| Piyasa yapısı | Swing high/low, HH/HL/LH/LL, BOS, CHoCH, destek/direnç, eşit tepe/dip, likidite bölgeleri, likidite süpürmesi, FVG, basit order block, önceki gün/hafta yüksek-düşük, 13 mum formasyonu (yalnızca uyum faktörü). |
+| Rejim | STRONG_BULL … PANIC, UNKNOWN; BTC trendi, funding ve OI bağlamı. |
+| Stratejiler | 33 bağımsız modül (LONG + SHORT, ayrı parametre seti), rejime göre yönlendirme, aç/kapa, yaşam döngüsü aşaması. |
+| Skor | LONG/SHORT ayrı 0-100, ağırlıklar ve eşikler ayarlanabilir, çifte sayım yok, çatışma tespiti. |
+| AI/ML | Meta-labeling (numpy lojistik regresyon; scikit-learn varsa Random Forest), triple-barrier etiketleri, kalibrasyon, permütasyon önemi, drift (PSI). LSTM/GRU/Transformer/XGBoost/LightGBM bu sürümde yok. |
+| Risk | Dinamik SL/TP, çoklu TP, breakeven, kâr kilidi, 7 trailing yöntemi, risk tabanlı boyut, maliyet/EV, portföy ve korelasyon riski, devre kesici, futures tasfiye fiyatı (Binance izole formül). |
+| Yürütme | Kağıt + canlı (spot MARKET; futures MARKET + reduceOnly + koruyucu STOP_MARKET), emir öncesi bakiye/filtre/spread/kayma/likidite kontrolü. |
+| Kayıt | SQLite sinyal veritabanı (`%APPDATA%\KreatifBot\signals.sqlite3`) ve karar günlüğü; her sinyal için açıklama. |
+| Araştırma | Backtest (ücret, spread, kayma, funding, gecikme, kısmi dolum), walk-forward, sağlamlık, ablasyon, kalibrasyon, tutma süresi, çıkış/giriş optimizasyonu, özellik korelasyonu, strateji sağlığı, 12 araştırma sorusu. |
+
+**Önemli:** Hiçbir strateji, eşik veya model kârlı kabul edilmez. Varsayılan aşama **PAPER**'dır; canlıda yalnızca `LIMITED_LIVE` / `FULL_LIVE` aşamasındaki stratejiler işlem açar. Yönetici ayarları **Zeka Motoru → Yönetici ayarları** sekmesinden (JSON) düzenlenir.
+
 ## 📘 Strateji ve Kullanım Rehberi (PDF)
 [`docs/KreatifBot_Strateji_Rehberi.pdf`](docs/KreatifBot_Strateji_Rehberi.pdf):
 uygulamanın yetenekleri, Binance API kurulumu, piyasa analizi skorunun nasıl okunacağı, 10 teknik gösterge,
@@ -107,6 +128,8 @@ kreatifbot/
   broker.py                 Kağıt ve canlı emir yürütme
   engine.py                 Bot motoru (arka plan iş parçacığı)
   telegram.py               Telegram bildirimleri ve komutlar
+  intel/                    Zeka Motoru: veri, özellik, rejim, MTF, stratejiler, skor, ML, risk, yürütme,
+                            pozisyon yönetimi, karar, backtest, araştırma, sinyal veritabanı, canlı motor
   config.py                 Ayarlar ve DPAPI ile anahtar şifreleme
   gui/                      PySide6 arayüzü
 tests/                      Birim, motor ve arayüz testleri

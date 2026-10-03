@@ -484,6 +484,31 @@ class BotTab(QWidget):
         ml.addWidget(self.live)
         ml.addWidget(self.net_label)
 
+        eng_box = QGroupBox("Motor")
+        ef = QFormLayout(eng_box)
+        self.engine_type = QComboBox()
+        self.engine_type.addItem("Klasik strateji (tek strateji, spot)", "classic")
+        self.engine_type.addItem("Zeka Motoru (çoklu strateji + rejim + risk)", "intel")
+        self.engine_type.setCurrentIndex(max(0, self.engine_type.findData(s.engine_type)))
+        self.intel_market = QComboBox()
+        self.intel_market.addItem("Binance Spot", "SPOT")
+        self.intel_market.addItem("Binance USDⓈ-M Futures", "USDM_FUTURES")
+        self.intel_market.setCurrentIndex(max(0, self.intel_market.findData(s.intel_market)))
+        self.leverage = QSpinBox()
+        self.leverage.setRange(1, 125)
+        self.leverage.setValue(s.intel_leverage)
+        self.leverage.setSuffix("x")
+        self.intel_note = QLabel("Zeka Motoru; zaman dilimleri, eşikler ve risk ayarlarını 'Zeka Motoru' sekmesinden "
+                                 "alır. Strateji aşaması LIMITED_LIVE/FULL_LIVE değilse canlıda işlem açmaz.")
+        self.intel_note.setWordWrap(True)
+        self.intel_note.setStyleSheet("color:#8b949e;")
+        ef.addRow("Motor", self.engine_type)
+        ef.addRow("Piyasa", self.intel_market)
+        ef.addRow("Kaldıraç (futures)", self.leverage)
+        ef.addRow(self.intel_note)
+        self.engine_type.currentIndexChanged.connect(lambda _: self._engine_changed())
+        self.intel_market.currentIndexChanged.connect(lambda _: self._engine_changed())
+
         mk_box = QGroupBox("Piyasa")
         mf = QFormLayout(mk_box)
         self.symbols = QLineEdit(", ".join(s.symbols))
@@ -513,7 +538,7 @@ class BotTab(QWidget):
         self.stop_btn.clicked.connect(self.stop)
 
         pl = QVBoxLayout(panel)
-        for w in (mode_box, mk_box, self.strategy, self.risk):
+        for w in (mode_box, eng_box, mk_box, self.strategy, self.risk):
             pl.addWidget(w)
         pl.addStretch()
         left = QWidget()
@@ -576,9 +601,21 @@ class BotTab(QWidget):
         split.setSizes([420, 1000])
         QVBoxLayout(self).addWidget(split)
         self.refresh_network_label()
+        self._engine_changed()
         self._load_history()
 
     # ---------------------------------------------------------------- yardımcılar
+    def is_intel(self) -> bool:
+        return self.engine_type.currentData() == "intel"
+
+    def _engine_changed(self):
+        intel = self.is_intel()
+        self.strategy.setVisible(not intel)
+        self.risk.setVisible(not intel)
+        self.interval.setEnabled(not intel)
+        self.intel_market.setEnabled(intel)
+        self.leverage.setEnabled(intel and self.intel_market.currentData() == "USDM_FUTURES")
+        self.intel_note.setVisible(intel)
     def refresh_network_label(self):
         s = self.ctx.settings
         if s.testnet:
@@ -590,6 +627,9 @@ class BotTab(QWidget):
         self.paper_balance.setSuffix(f" {s.quote_asset}")
 
     def _state_path(self, live: bool):
+        if self.is_intel():
+            net = "paper" if not live else ("testnet" if self.ctx.settings.testnet else "live")
+            return data_dir() / f"state_intel_{net}_{self.intel_market.currentData().lower()}.json"
         if not live:
             return data_dir() / "state_paper.json"
         return data_dir() / ("state_live_testnet.json" if self.ctx.settings.testnet else "state_live.json")
@@ -617,6 +657,9 @@ class BotTab(QWidget):
         s.risk = self.risk.settings().to_dict()
         s.paper_balance = self.paper_balance.value()
         s.live_mode = self.live.isChecked()
+        s.engine_type = self.engine_type.currentData()
+        s.intel_market = self.intel_market.currentData()
+        s.intel_leverage = self.leverage.value()
         self.ctx.persist()
         return s
 
@@ -624,8 +667,10 @@ class BotTab(QWidget):
         self.start_btn.setEnabled(not running)
         self.stop_btn.setEnabled(running)
         for w in (self.paper, self.live, self.paper_balance, self.reset_paper, self.symbols, self.interval,
-                  self.poll, self.strategy, self.risk):
+                  self.poll, self.strategy, self.risk, self.engine_type, self.intel_market, self.leverage):
             w.setEnabled(not running)
+        if not running:
+            self._engine_changed()
         self.ctx.set_bot_running(running)
 
     # ---------------------------------------------------------------- başlat / durdur
@@ -650,6 +695,9 @@ class BotTab(QWidget):
             if box.exec() != QMessageBox.StandardButton.Yes:
                 return
 
+        if self.is_intel():
+            self._start_intel(s, live)
+            return
         # Kağıt işlemde gerçek piyasa fiyatları (Ayarlar'a göre), canlıda işlem yapılan ağ kullanılır.
         client = self.ctx.trade_client() if live else self.ctx.data_client()
         strategy, risk = self.strategy.create(), self.risk.settings()
@@ -702,6 +750,114 @@ class BotTab(QWidget):
         def failed(msg):
             self.start_btn.setEnabled(True)
             self.ctx.show_error("Bot başlatılamadı", msg)
+
+        self.ctx.tasks.run(prepare, ready, failed)
+
+    def _attach_engine(self, engine):
+        notifier = self.ctx.make_notifier()
+        if self.notifier is not None:
+            self.notifier.stop(timeout=0)
+        self.notifier = notifier
+        if notifier is not None:
+            notifier.attach(engine)
+            notifier.start()
+            self.log.appendPlainText("[Telegram] Bildirimler etkin.")
+        self.engine = engine
+        self._set_running(True)
+        self.ctx.status("Bot çalışıyor.")
+        self.log.appendPlainText("")
+        engine.start()
+        self._refresh_positions()
+        self._show_trades(engine.trades)
+
+    def _event_sink(self):
+        gui_emit = self.ctx.bridge.event.emit
+        holder = {"n": None}
+
+        def on_event(kind, payload):
+            gui_emit(kind, payload)
+            n = self.notifier
+            if n is not None and n.engine is holder.get("engine"):
+                n.handle_event(kind, payload)
+        return on_event, holder
+
+    def _start_intel(self, s, live: bool):
+        """Zeka Motoru'nu (spot/futures, kağıt/canlı) başlatır."""
+        from ..intel.config import load_intel_config
+        from ..intel.decision import DecisionEngine
+        from ..intel.execution import FuturesLiveVenue, PaperVenue, SpotLiveVenue
+        from ..intel.futures_client import BinanceFuturesClient
+        from ..intel.live_engine import IntelligentBotEngine
+        from ..intel.signal_store import SignalStore
+
+        cfg = load_intel_config()
+        cfg.market = s.intel_market
+        cfg.quote_asset = s.quote_asset
+        cfg.risk.leverage = min(s.intel_leverage, cfg.risk.max_leverage) if cfg.market != "SPOT" else 1
+        errors = cfg.validate()
+        if errors:
+            self.ctx.show_error("Zeka Motoru ayarları geçersiz", "\n".join(errors))
+            return
+        futures_mkt = cfg.market != "SPOT"
+        if live:
+            if not s.api_key or not s.api_secret:
+                self.ctx.show_error("API anahtarı yok", "Canlı işlem için API anahtarı gerekli.")
+                return
+            net = "TESTNET" if s.testnet else "GERÇEK BINANCE HESABINIZ"
+            live_strats = [k for k, sc in cfg.strategies.items() if sc.enabled and sc.stage in ("LIMITED_LIVE",
+                                                                                                 "FULL_LIVE")]
+            text = (f"Zeka Motoru <b>{net}</b> üzerinde <b>{'USDⓈ-M Futures' if futures_mkt else 'Spot'}</b> "
+                    f"piyasasında gerçek emir gönderecek.<br>Semboller: {', '.join(s.symbols)}<br>"
+                    f"Canlı izinli stratejiler: {', '.join(live_strats) or 'YOK (hiç işlem açılmaz)'}<br>"
+                    f"Kaldıraç: {cfg.risk.leverage}x, işlem başı risk %{cfg.risk.risk_per_trade_pct}<br><br>"
+                    "Kaldıraçlı işlemler tasfiye riski taşır. Devam edilsin mi?")
+            box = QMessageBox(QMessageBox.Icon.Warning, "Canlı işlem onayı", text,
+                              QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, self)
+            box.setDefaultButton(QMessageBox.StandardButton.No)
+            if box.exec() != QMessageBox.StandardButton.Yes:
+                return
+        st = self.ctx.settings
+        if live:
+            spot = self.ctx.trade_client()
+            fut = BinanceFuturesClient(st.api_key, st.api_secret, testnet=st.testnet)
+        else:
+            spot = self.ctx.data_client()
+            fut = BinanceFuturesClient(testnet=not st.mainnet_data and st.testnet)
+        market_client = fut if futures_mkt else spot
+        self.start_btn.setEnabled(False)
+        self.ctx.status("Zeka Motoru hazırlanıyor (Binance bağlantısı ve sembol filtreleri)...")
+
+        def prepare():
+            market_client.sync_time()
+            for sym in s.symbols:
+                market_client.symbol_rules(sym)
+            if live:
+                venue = FuturesLiveVenue(fut, cfg, s.quote_asset) if futures_mkt else SpotLiveVenue(spot, cfg,
+                                                                                                    s.quote_asset)
+                venue.available_balance()
+            else:
+                venue = PaperVenue(cfg.market, s.paper_balance, cfg, s.quote_asset)
+            return venue, SignalStore()
+
+        def ready(result):
+            venue, store = result
+            on_event, holder = self._event_sink()
+            try:
+                de = DecisionEngine(cfg, meta_model=self.ctx.intel_meta, strategy_stats=self.ctx.intel_stats,
+                                    health=self.ctx.intel_health)
+                engine = IntelligentBotEngine(cfg, s.symbols, market_client, venue, store, futures_client=fut,
+                                              decision_engine=de, poll_seconds=s.poll_seconds,
+                                              state_path=self._state_path(live), on_event=on_event)
+            except ValueError as exc:
+                self.start_btn.setEnabled(True)
+                self.ctx.show_error("Zeka Motoru başlatılamadı", str(exc))
+                return
+            holder["engine"] = engine
+            self._attach_engine(engine)
+
+        def failed(msg):
+            self.start_btn.setEnabled(True)
+            self.ctx.show_error("Zeka Motoru başlatılamadı", msg)
 
         self.ctx.tasks.run(prepare, ready, failed)
 
@@ -785,7 +941,9 @@ class BotTab(QWidget):
         for sym, p in list(self.engine.positions.items()):
             price = self.engine.last_prices.get(sym, p.entry_price)
             pnl, pnl_pct = p.unrealized(price)
-            rows.append([sym, fmt_qty(p.qty), fmt_price(p.entry_price), fmt_price(price),
+            side = getattr(p, "direction", "LONG")
+            qty_text = fmt_qty(p.qty) if side == "LONG" else f"SHORT {fmt_qty(p.qty)}"
+            rows.append([sym, qty_text, fmt_price(p.entry_price), fmt_price(price),
                          fmt_money(p.qty * price), f"{pnl:+.2f}", fmt_pct(pnl_pct),
                          fmt_price(p.stop_loss) if p.stop_loss else "-",
                          fmt_price(p.take_profit) if p.take_profit else "-", p.opened_at])

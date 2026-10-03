@@ -197,3 +197,113 @@ def test_telegram_tab_save_and_scanner_send(app, window):
     assert wait(app, lambda: window.analysis.tg_button.isEnabled())
     window.analysis.send_telegram()
     assert "Piyasa taraması" in sent[0] and "analizi" in sent[1]
+
+
+# ---------------------------------------------------------------- Zeka Motoru / Araştırma sekmeleri
+def _patch_intel_network(monkeypatch):
+    """Ağ çağrılarını sentetik veriyle değiştirir (yalnızca test)."""
+    from kreatifbot.intel import futures_client, market_data
+    from kreatifbot.intel.types import FeatureSet
+
+    from .test_intel import FakeMarket, resample, with_taker
+    df = with_taker(make_ohlcv(1500, seed=4))
+
+    def fake_history(cfg, symbol, bars, spot=None, futures=None, include_derivatives=True):
+        e = df.tail(bars).reset_index(drop=True)
+        return market_data.HistoricalBundle(symbol, cfg.market, e, {"trend": resample(e, "4h"),
+                                            "major": resample(e, "4h"), "confirmation": e,
+                                            "macro": resample(e, "1D")}, None, None, [])
+
+    monkeypatch.setattr(market_data, "load_history", fake_history)
+    monkeypatch.setattr(market_data, "live_snapshot", lambda *a, **k: (FeatureSet(), {"spot_book": None,
+                                                                                     "futures_book": None}))
+    fm = FakeMarket(df)
+
+    class FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        def symbol_rules(self, symbol):
+            return fm.symbol_rules(symbol)
+
+    import kreatifbot.binance_client as bc
+    monkeypatch.setattr(bc, "BinanceClient", FakeClient)
+
+    class FakeFut(FakeClient):
+        def funding_history(self, *a, **k):
+            raise bc.BinanceAPIError(0, -2, "test: ağ yok")
+        open_interest_hist = long_short_ratio = taker_volume = premium_index = funding_history
+
+    monkeypatch.setattr(futures_client, "BinanceFuturesClient", FakeFut)
+    return fm
+
+
+def _intel_cfg_1h(tmp_path=None):
+    from kreatifbot.intel.config import IntelConfig, save_intel_config
+    cfg = IntelConfig()
+    cfg.timeframes.entry, cfg.timeframes.confirmation, cfg.timeframes.trend = "1h", "1h", "4h"
+    cfg.timeframes.major, cfg.timeframes.macro = "4h", "1d"
+    cfg.btc_context = False
+    cfg.data_quality.min_history_bars = 200
+    save_intel_config(cfg)
+    return cfg
+
+
+def test_intel_tab_decision_and_config(app, window, monkeypatch):
+    _patch_intel_network(monkeypatch)
+    _intel_cfg_1h()
+    tab = window.intel_tab
+    tab.load_cfg()
+    tab.bars.setValue(600)
+    tab.run()
+    assert wait(app, lambda: tab.run_btn.isEnabled() and tab.log.toPlainText() != "", timeout=60)
+    text = tab.explain.toPlainText()
+    assert "Karar:" in text and "Piyasa rejimi" in text
+    assert tab.scores.rowCount() >= 9 and tab.strats.rowCount() == 33
+    # Yönetici ayarları: geçersiz JSON reddedilir, geçerli kaydedilir
+    tab.cfg_edit.setPlainText("{bozuk")
+    tab.save_cfg()
+    assert "JSON" in tab.cfg_msg.text()
+    tab.load_cfg()
+    tab.st_table.cellWidget(0, 0).setChecked(False)
+    tab.save_strategies()
+    from kreatifbot.intel.config import load_intel_config
+    first_key = tab.st_table.item(0, 1).data(0x0100)
+    assert load_intel_config().strategy(first_key).enabled is False
+    assert not window.errors
+
+
+def test_research_tab_backtest_and_questions(app, window, monkeypatch):
+    _patch_intel_network(monkeypatch)
+    _intel_cfg_1h()
+    tab = window.research_tab
+    tab.bars.setValue(1500)
+    tab.run_backtest()
+    assert wait(app, lambda: all(b.isEnabled() for b in tab.buttons) and tab.summary.rowCount() > 0, timeout=120)
+    assert tab.rc.backtest is not None and tab.rc.backtest.status == "OK"
+    tab.question.setCurrentIndex(list(__import__("kreatifbot.intel.research", fromlist=["x"]).QUESTIONS).index(
+        "edge_after_fees"))
+    tab.ask()
+    assert "Brüt PnL" in tab.answer.toPlainText()
+
+
+def test_bot_tab_starts_intel_engine_paper(app, window, monkeypatch):
+    fm = _patch_intel_network(monkeypatch)
+    cfg = _intel_cfg_1h()
+    cfg.use_futures_context = False
+    from kreatifbot.intel.config import save_intel_config
+    save_intel_config(cfg)
+    window.data_client = lambda: fm
+    bot = window.bot
+    bot.paper.setChecked(True)
+    bot.engine_type.setCurrentIndex(bot.engine_type.findData("intel"))
+    assert not bot.strategy.isVisible()
+    bot.symbols.setText("BTCUSDT")
+    bot.poll.setValue(5)
+    bot.start()
+    assert wait(app, lambda: bot.engine is not None and bot.engine.running, timeout=30)
+    assert wait(app, lambda: window.intel_tab.live_table.rowCount() > 0, timeout=60)
+    assert "Zeka Motoru" in bot.log.toPlainText()
+    bot.stop()
+    assert wait(app, lambda: not bot.engine.running, timeout=40)
+    assert not window.errors

@@ -152,3 +152,176 @@ def cross_below(a: pd.Series, b) -> pd.Series:
     """a, b'yi yukarıdan aşağı kestiği mumda True."""
     b_prev = b.shift() if isinstance(b, pd.Series) else b
     return (a < b) & (a.shift() >= b_prev)
+
+
+# ---------------------------------------------------------------------------
+# Genişletilmiş gösterge seti (zeka motoru). Hepsi nedenseldir: t anındaki değer
+# yalnızca t ve öncesindeki mumları kullanır.
+# ---------------------------------------------------------------------------
+
+def typical_price(df: pd.DataFrame) -> pd.Series:
+    return (df["high"] + df["low"] + df["close"]) / 3
+
+
+def vwap_session(df: pd.DataFrame) -> pd.Series:
+    """UTC gün başında sıfırlanan oturum VWAP'ı (gün içi kümülatif)."""
+    tp = typical_price(df)
+    day = pd.to_datetime(df["open_time"]).dt.floor("D") if "open_time" in df else pd.Series(0, index=df.index)
+    pv = (tp * df["volume"]).groupby(day).cumsum()
+    vol = df["volume"].groupby(day).cumsum().replace(0, np.nan)
+    return pv / vol
+
+
+def vwap_rolling(df: pd.DataFrame, period: int = 50) -> pd.Series:
+    tp = typical_price(df)
+    pv = (tp * df["volume"]).rolling(period, min_periods=period).sum()
+    vol = df["volume"].rolling(period, min_periods=period).sum().replace(0, np.nan)
+    return pv / vol
+
+
+def anchored_vwap(df: pd.DataFrame, anchor_mask: pd.Series) -> pd.Series:
+    """Her True işaretinde yeniden başlayan VWAP (ör. son kırılım veya swing noktası)."""
+    tp = typical_price(df)
+    group = anchor_mask.fillna(False).astype(int).cumsum()
+    pv = (tp * df["volume"]).groupby(group).cumsum()
+    vol = df["volume"].groupby(group).cumsum().replace(0, np.nan)
+    out = pv / vol
+    return out.where(group > 0)
+
+
+def parabolic_sar(df: pd.DataFrame, step: float = 0.02, max_step: float = 0.2) -> pd.Series:
+    high = df["high"].to_numpy(dtype=float)
+    low = df["low"].to_numpy(dtype=float)
+    n = len(df)
+    sar = np.full(n, np.nan)
+    if n < 2:
+        return pd.Series(sar, index=df.index)
+    bull = high[1] >= high[0]
+    af = step
+    ep = high[0] if bull else low[0]
+    sar[0] = low[0] if bull else high[0]
+    for i in range(1, n):
+        prev = sar[i - 1]
+        cur = prev + af * (ep - prev)
+        if bull:
+            cur = min(cur, low[i - 1], low[i - 2] if i >= 2 else low[i - 1])
+            if low[i] < cur:
+                bull, cur, ep, af = False, ep, low[i], step
+            elif high[i] > ep:
+                ep, af = high[i], min(af + step, max_step)
+        else:
+            cur = max(cur, high[i - 1], high[i - 2] if i >= 2 else high[i - 1])
+            if high[i] > cur:
+                bull, cur, ep, af = True, ep, high[i], step
+            elif low[i] < ep:
+                ep, af = low[i], min(af + step, max_step)
+        sar[i] = cur
+    return pd.Series(sar, index=df.index)
+
+
+def ichimoku(df: pd.DataFrame, tenkan: int = 9, kijun: int = 26, senkou: int = 52):
+    """(tenkan, kijun, span_a, span_b) — bulut değerleri t anında bilinen haliyle (26 mum geriden).
+
+    Chikou span gelecekteki fiyatı geçmişe çizdiği için ileriye bakma oluşturur; bunun yerine
+    'chikou onayı' olarak kapanışın 26 mum önceki kapanışla karşılaştırması kullanılmalıdır.
+    """
+    def mid(n):
+        return (df["high"].rolling(n, min_periods=n).max() + df["low"].rolling(n, min_periods=n).min()) / 2
+    t, k = mid(tenkan), mid(kijun)
+    span_a = ((t + k) / 2).shift(kijun)
+    span_b = mid(senkou).shift(kijun)
+    return t, k, span_a, span_b
+
+
+def stoch_rsi(close: pd.Series, period: int = 14, k: int = 3, d: int = 3):
+    r = rsi(close, period)
+    lo = r.rolling(period, min_periods=period).min()
+    hi = r.rolling(period, min_periods=period).max()
+    raw = (100 * (r - lo) / (hi - lo).replace(0, np.nan)).clip(0, 100)
+    k_line = sma(raw, k)
+    return k_line, sma(k_line, d)
+
+
+def roc(close: pd.Series, period: int = 10) -> pd.Series:
+    return (close / close.shift(period) - 1) * 100
+
+
+def momentum(close: pd.Series, period: int = 10) -> pd.Series:
+    return close - close.shift(period)
+
+
+def cci(df: pd.DataFrame, period: int = 20) -> pd.Series:
+    tp = typical_price(df)
+    ma = tp.rolling(period, min_periods=period).mean()
+    md = tp.rolling(period, min_periods=period).apply(lambda x: np.mean(np.abs(x - x.mean())), raw=True)
+    return (tp - ma) / (0.015 * md.replace(0, np.nan))
+
+
+def williams_r(df: pd.DataFrame, period: int = 14) -> pd.Series:
+    hh = df["high"].rolling(period, min_periods=period).max()
+    ll = df["low"].rolling(period, min_periods=period).min()
+    return -100 * (hh - df["close"]) / (hh - ll).replace(0, np.nan)
+
+
+def mfi(df: pd.DataFrame, period: int = 14) -> pd.Series:
+    tp = typical_price(df)
+    flow = tp * df["volume"]
+    direction = tp.diff()
+    pos = flow.where(direction > 0, 0.0).rolling(period, min_periods=period).sum()
+    neg = flow.where(direction < 0, 0.0).rolling(period, min_periods=period).sum()
+    out = 100 - 100 / (1 + pos / neg.replace(0, np.nan))
+    return out.where(neg != 0, 100.0).where(pos.notna())
+
+
+def bollinger_width(close: pd.Series, period: int = 20, mult: float = 2.0) -> pd.Series:
+    mid, upper, lower = bollinger(close, period, mult)
+    return (upper - lower) / mid.replace(0, np.nan)
+
+
+def keltner(df: pd.DataFrame, period: int = 20, mult: float = 2.0, atr_period: int = 10):
+    mid = ema(df["close"], period)
+    a = atr(df, atr_period)
+    return mid, mid + mult * a, mid - mult * a
+
+
+def log_returns(close: pd.Series) -> pd.Series:
+    return np.log(close / close.shift())
+
+
+def historical_volatility(close: pd.Series, period: int = 30, bars_per_year: float = 365 * 24) -> pd.Series:
+    """Yıllıklandırılmış standart sapma (%)."""
+    return log_returns(close).rolling(period, min_periods=period).std() * np.sqrt(bars_per_year) * 100
+
+
+def realized_volatility(close: pd.Series, period: int = 30) -> pd.Series:
+    """Pencere içi gerçekleşen volatilite: sqrt(Σ r²) (%)."""
+    r = log_returns(close)
+    return np.sqrt((r ** 2).rolling(period, min_periods=period).sum()) * 100
+
+
+def rolling_percentile(series: pd.Series, window: int = 250) -> pd.Series:
+    """Son değerin pencere içindeki yüzdelik sırası (0..1), nedensel."""
+    return series.rolling(window, min_periods=max(20, window // 5)).rank(pct=True)
+
+
+def zscore(series: pd.Series, period: int = 50) -> pd.Series:
+    mean = series.rolling(period, min_periods=period).mean()
+    std = series.rolling(period, min_periods=period).std(ddof=0)
+    return (series - mean) / std.replace(0, np.nan)
+
+
+def relative_volume(volume: pd.Series, period: int = 20) -> pd.Series:
+    """Hacim / önceki N mumun ortalaması (mevcut mum ortalamaya dahil değil)."""
+    return volume / volume.shift().rolling(period, min_periods=period).mean().replace(0, np.nan)
+
+
+def volume_delta(df: pd.DataFrame) -> pd.Series:
+    """Taker alış hacmi - taker satış hacmi (Binance kline taker verisinden). Veri yoksa NaN."""
+    if "taker_buy_base" not in df:
+        return pd.Series(np.nan, index=df.index)
+    return 2 * df["taker_buy_base"] - df["volume"]
+
+
+def cvd(df: pd.DataFrame) -> pd.Series:
+    d = volume_delta(df)
+    return d.cumsum() if d.notna().any() else d

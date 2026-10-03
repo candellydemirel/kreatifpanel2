@@ -205,7 +205,9 @@ class TelegramNotifier:
                     f"{esc(payload.get('reason', ''))}")
         if kind == "opened" and self.notify["trades"]:
             p = payload
-            lines = [f"✅ <b>ALIM — {esc(p.symbol)}</b>",
+            side = getattr(p, "direction", "LONG")
+            title = "ALIM" if side == "LONG" else "SHORT AÇILDI"
+            lines = [f"✅ <b>{title} — {esc(p.symbol)}</b>",
                      f"Miktar: {_num(p.qty)} @ {_num(p.entry_price)}",
                      f"Tutar: {p.cost:.2f} {self.quote}"]
             if p.stop_loss:
@@ -216,7 +218,8 @@ class TelegramNotifier:
         if kind == "trade" and self.notify["trades"]:
             t = payload
             icon = "💰" if t.pnl > 0 else "🔻"
-            return (f"{icon} <b>SATIŞ — {esc(t.symbol)}</b> ({esc(t.reason)})\n"
+            title = "SATIŞ" if getattr(t, "side", "LONG") == "LONG" else "SHORT KAPANDI"
+            return (f"{icon} <b>{title} — {esc(t.symbol)}</b> ({esc(t.reason)})\n"
                     f"Giriş {_num(t.entry_price)} → Çıkış {_num(t.exit_price)}\n"
                     f"K/Z: <b>{t.pnl:+.2f} {self.quote} ({t.pnl_pct:+.2f}%)</b>")
         if kind == "halt" and self.notify["risk"]:

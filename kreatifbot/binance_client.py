@@ -9,8 +9,8 @@ from __future__ import annotations
 import hashlib
 import hmac
 import time
-from dataclasses import dataclass
-from decimal import ROUND_DOWN, Decimal
+from dataclasses import dataclass, field
+from decimal import ROUND_DOWN, ROUND_HALF_UP, ROUND_UP, Decimal
 from urllib.parse import urlencode
 
 import pandas as pd
@@ -34,6 +34,15 @@ class BinanceAPIError(Exception):
 
 
 @dataclass
+class OrderCheck:
+    ok: bool
+    quantity: str = "0"
+    price: str | None = None
+    notional: float = 0.0
+    errors: list = field(default_factory=list)
+
+
+@dataclass
 class SymbolRules:
     symbol: str
     base_asset: str
@@ -43,13 +52,103 @@ class SymbolRules:
     tick_size: str
     min_notional: float
     quote_precision: int
+    max_qty: float = 0.0                 # 0 = sınırsız/bilinmiyor
+    market_step_size: str = ""           # MARKET_LOT_SIZE (piyasa emirleri için)
+    market_min_qty: float = 0.0
+    market_max_qty: float = 0.0
+    min_price: float = 0.0
+    max_price: float = 0.0
+    price_precision: int = 8
+    quantity_precision: int = 8
+    status: str = "TRADING"
+    market: str = "SPOT"
 
-    def floor_qty(self, qty: float) -> str:
-        return floor_to_step(qty, self.step_size)
+    @property
+    def tradable(self) -> bool:
+        return self.status == "TRADING"
+
+    def floor_qty(self, qty: float, market_order: bool = False) -> str:
+        step = self.market_step_size if market_order and self.market_step_size else self.step_size
+        return floor_to_step(qty, step)
 
     def floor_quote(self, amount: float) -> str:
         step = "1" if self.quote_precision <= 0 else "0." + "0" * (self.quote_precision - 1) + "1"
         return floor_to_step(amount, step)
+
+    def round_price(self, price: float, side: str = "") -> str:
+        """Fiyatı tickSize'a yuvarlar. Alımda aşağı, satımda yukarı (emir tarafını kötüleştirmez)."""
+        if side.upper() == "SELL":
+            return ceil_to_step(price, self.tick_size)
+        if side.upper() == "BUY":
+            return floor_to_step(price, self.tick_size)
+        return round_to_step(price, self.tick_size)
+
+    def check_order(self, qty: float, price: float, market_order: bool = True,
+                    limit_price: float | None = None, side: str = "") -> OrderCheck:
+        """Binance borsa filtrelerini emir göndermeden önce uygular."""
+        errors = []
+        if not self.tradable:
+            errors.append(f"{self.symbol} işlem durumu {self.status}")
+        q = self.floor_qty(qty, market_order)
+        qf = float(q)
+        min_q = self.market_min_qty if market_order and self.market_min_qty else self.min_qty
+        max_q = self.market_max_qty if market_order and self.market_max_qty else self.max_qty
+        if qf <= 0:
+            errors.append("Miktar adım büyüklüğüne yuvarlanınca sıfır oldu")
+        if min_q and qf < min_q:
+            errors.append(f"Miktar {q} < minQty {min_q}")
+        if max_q and qf > max_q:
+            errors.append(f"Miktar {q} > maxQty {max_q}")
+        p_text = None
+        ref_price = price
+        if limit_price is not None:
+            p_text = self.round_price(limit_price, side)
+            ref_price = float(p_text)
+            if self.min_price and ref_price < self.min_price:
+                errors.append(f"Fiyat {p_text} < minPrice {self.min_price}")
+            if self.max_price and ref_price > self.max_price:
+                errors.append(f"Fiyat {p_text} > maxPrice {self.max_price}")
+        notional = qf * ref_price
+        if self.min_notional and notional < self.min_notional:
+            errors.append(f"İşlem tutarı {notional:.4f} < minNotional {self.min_notional}")
+        return OrderCheck(ok=not errors, quantity=q, price=p_text, notional=notional, errors=errors)
+
+
+def _decimals(step: str) -> int:
+    d = Decimal(str(step)).normalize()
+    return max(0, -d.as_tuple().exponent)
+
+
+def parse_symbol_rules(sym: dict, market: str = "SPOT") -> SymbolRules:
+    """Spot veya futures exchangeInfo sembol kaydından kuralları çıkarır."""
+    filters = {f["filterType"]: f for f in sym.get("filters", [])}
+    lot = filters.get("LOT_SIZE", {})
+    mlot = filters.get("MARKET_LOT_SIZE", {})
+    price = filters.get("PRICE_FILTER", {})
+    notional = filters.get("NOTIONAL") or filters.get("MIN_NOTIONAL") or {}
+    min_notional = notional.get("minNotional", notional.get("notional", 0))
+    step = lot.get("stepSize", "0.00000001")
+    tick = price.get("tickSize", "0.00000001")
+    return SymbolRules(
+        symbol=sym["symbol"].upper(),
+        base_asset=sym.get("baseAsset", ""),
+        quote_asset=sym.get("quoteAsset", ""),
+        step_size=step,
+        min_qty=float(lot.get("minQty", 0)),
+        tick_size=tick,
+        min_notional=float(min_notional or 0),
+        quote_precision=int(sym.get("quoteAssetPrecision", sym.get("quotePrecision", 8))),
+        max_qty=float(lot.get("maxQty", 0)),
+        market_step_size=mlot.get("stepSize", "") if float(mlot.get("stepSize", 0) or 0) > 0 else "",
+        market_min_qty=float(mlot.get("minQty", 0) or 0),
+        market_max_qty=float(mlot.get("maxQty", 0) or 0),
+        min_price=float(price.get("minPrice", 0) or 0),
+        max_price=float(price.get("maxPrice", 0) or 0),
+        price_precision=int(sym.get("pricePrecision", _decimals(tick))),
+        quantity_precision=int(sym.get("quantityPrecision", _decimals(step))),
+        status=sym.get("status", sym.get("contractStatus", "UNKNOWN")),
+        market=market,
+    )
 
 
 def floor_to_step(value: float, step: str) -> str:
@@ -62,6 +161,24 @@ def floor_to_step(value: float, step: str) -> str:
     if "." in text:
         text = text.rstrip("0").rstrip(".")
     return text or "0"
+
+
+def ceil_to_step(value: float, step: str) -> str:
+    step_d = Decimal(str(step)).normalize()
+    if step_d <= 0:
+        return format(Decimal(str(value)).normalize(), "f")
+    units = (Decimal(str(value)) / step_d).to_integral_value(rounding=ROUND_UP)
+    text = format((units * step_d).quantize(step_d), "f")
+    return text.rstrip("0").rstrip(".") if "." in text else text
+
+
+def round_to_step(value: float, step: str) -> str:
+    step_d = Decimal(str(step)).normalize()
+    if step_d <= 0:
+        return format(Decimal(str(value)).normalize(), "f")
+    units = (Decimal(str(value)) / step_d).to_integral_value(rounding=ROUND_HALF_UP)
+    text = format((units * step_d).quantize(step_d), "f")
+    return text.rstrip("0").rstrip(".") if "." in text else text
 
 
 def sign_query(secret: str, query: str) -> str:
@@ -144,23 +261,21 @@ class BinanceClient:
         if symbol in self._rules_cache:
             return self._rules_cache[symbol]
         info = self.exchange_info(symbol)
-        sym = info["symbols"][0]
-        filters = {f["filterType"]: f for f in sym.get("filters", [])}
-        lot = filters.get("LOT_SIZE", {})
-        price = filters.get("PRICE_FILTER", {})
-        notional = filters.get("NOTIONAL") or filters.get("MIN_NOTIONAL") or {}
-        rules = SymbolRules(
-            symbol=symbol,
-            base_asset=sym["baseAsset"],
-            quote_asset=sym["quoteAsset"],
-            step_size=lot.get("stepSize", "0.00000001"),
-            min_qty=float(lot.get("minQty", 0)),
-            tick_size=price.get("tickSize", "0.00000001"),
-            min_notional=float(notional.get("minNotional", 0)),
-            quote_precision=int(sym.get("quoteAssetPrecision", sym.get("quotePrecision", 8))),
-        )
+        rules = parse_symbol_rules(info["symbols"][0], "SPOT")
         self._rules_cache[symbol] = rules
         return rules
+
+    def all_symbol_rules(self, quote_asset: str | None = None, trading_only: bool = True) -> dict[str, SymbolRules]:
+        out = {}
+        for sym in self.exchange_info().get("symbols", []):
+            if quote_asset and sym.get("quoteAsset") != quote_asset:
+                continue
+            if trading_only and sym.get("status") != "TRADING":
+                continue
+            rules = parse_symbol_rules(sym, "SPOT")
+            out[rules.symbol] = rules
+            self._rules_cache[rules.symbol] = rules
+        return out
 
     def klines(self, symbol: str, interval: str, limit: int = 500,
                end_time: int | None = None, closed_only: bool = False) -> pd.DataFrame:
@@ -195,6 +310,25 @@ class BinanceClient:
     def ticker_24h(self, symbol: str | None = None):
         return self._request("GET", "/api/v3/ticker/24hr", {"symbol": symbol})
 
+    def ticker_price(self, symbol: str | None = None):
+        return self._request("GET", "/api/v3/ticker/price", {"symbol": symbol})
+
+    def book_ticker(self, symbol: str | None = None):
+        """En iyi alış/satış fiyatı ve miktarı."""
+        return self._request("GET", "/api/v3/ticker/bookTicker", {"symbol": symbol})
+
+    def depth(self, symbol: str, limit: int = 100) -> dict:
+        """Order book (derinlik). limit: 5, 10, 20, 50, 100, 500, 1000, 5000."""
+        return self._request("GET", "/api/v3/depth", {"symbol": symbol.upper(), "limit": limit})
+
+    def trades(self, symbol: str, limit: int = 500) -> list:
+        return self._request("GET", "/api/v3/trades", {"symbol": symbol.upper(), "limit": min(limit, 1000)})
+
+    def agg_trades(self, symbol: str, limit: int = 500, start_time: int | None = None,
+                   end_time: int | None = None) -> list:
+        return self._request("GET", "/api/v3/aggTrades", {
+            "symbol": symbol.upper(), "limit": min(limit, 1000), "startTime": start_time, "endTime": end_time})
+
     def price(self, symbol: str) -> float:
         return float(self._request("GET", "/api/v3/ticker/price", {"symbol": symbol.upper()})["price"])
 
@@ -224,14 +358,45 @@ class BinanceClient:
             "newOrderRespType": "FULL",
         }, signed=True)
 
+    def order_limit(self, symbol: str, side: str, quantity: str, price: str, time_in_force: str = "GTC",
+                    test: bool = False) -> dict:
+        path = "/api/v3/order/test" if test else "/api/v3/order"
+        return self._request("POST", path, {
+            "symbol": symbol.upper(), "side": side.upper(), "type": "LIMIT", "timeInForce": time_in_force,
+            "quantity": quantity, "price": price, "newOrderRespType": "FULL",
+        }, signed=True)
+
+    def order_stop_loss_limit(self, symbol: str, side: str, quantity: str, stop_price: str, price: str,
+                              test: bool = False) -> dict:
+        path = "/api/v3/order/test" if test else "/api/v3/order"
+        return self._request("POST", path, {
+            "symbol": symbol.upper(), "side": side.upper(), "type": "STOP_LOSS_LIMIT", "timeInForce": "GTC",
+            "quantity": quantity, "price": price, "stopPrice": stop_price,
+        }, signed=True)
+
+    def cancel_order(self, symbol: str, order_id: int) -> dict:
+        return self._request("DELETE", "/api/v3/order", {"symbol": symbol.upper(), "orderId": order_id},
+                             signed=True)
+
+    def open_orders(self, symbol: str | None = None) -> list:
+        return self._request("GET", "/api/v3/openOrders", {"symbol": symbol}, signed=True)
+
     def my_trades(self, symbol: str, limit: int = 50) -> list:
         return self._request("GET", "/api/v3/myTrades", {"symbol": symbol.upper(), "limit": limit}, signed=True)
 
 
 def klines_to_frame(raw: list) -> pd.DataFrame:
+    """Binance kline yanıtını DataFrame'e çevirir (spot ve futures aynı biçim).
+
+    taker_buy_base / taker_buy_quote: agresif alıcıların (taker buy) hacmi; delta ve CVD bunlardan
+    hesaplanır. Bu Binance'in gerçek verisidir, tahmin değildir.
+    """
     df = pd.DataFrame(raw, columns=KLINE_COLUMNS)
-    for col in ("open", "high", "low", "close", "volume", "quote_volume"):
+    for col in ("open", "high", "low", "close", "volume", "quote_volume", "taker_base", "taker_quote"):
         df[col] = df[col].astype(float)
+    df["trades"] = df["trades"].astype("int64")
     df["open_time"] = pd.to_datetime(df["open_time"].astype("int64"), unit="ms", utc=True)
     df["close_time"] = pd.to_datetime(df["close_time"].astype("int64"), unit="ms", utc=True)
-    return df[["open_time", "open", "high", "low", "close", "volume", "close_time", "quote_volume"]]
+    df = df.rename(columns={"taker_base": "taker_buy_base", "taker_quote": "taker_buy_quote"})
+    return df[["open_time", "open", "high", "low", "close", "volume", "close_time", "quote_volume",
+               "trades", "taker_buy_base", "taker_buy_quote"]]

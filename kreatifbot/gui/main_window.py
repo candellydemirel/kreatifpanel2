@@ -12,6 +12,8 @@ from ..config import GUIDE_PDF, Settings, data_dir, load_settings, resource_path
 from .api_dialog import ApiKeyDialog
 from ..telegram import TelegramClient, TelegramNotifier
 from .tabs import AnalysisTab, BacktestTab, BotTab, ScannerTab, SettingsTab
+from .intel_tab import IntelTab
+from .research_tab import ResearchTab
 from .telegram_tab import TelegramTab
 from .widgets import TaskRunner
 
@@ -60,6 +62,11 @@ class MainWindow(QMainWindow):
         self.tasks = TaskRunner(self)
         self.bridge = EngineBridge()
         self._bot_running = False
+        # Zeka motoru oturum durumu (meta model, strateji istatistikleri ve sağlığı Araştırma'dan gelir)
+        self.intel_meta = None
+        self.intel_stats = None
+        self.intel_health = None
+        self.intel_last_decision = None
 
         self.tabs = QTabWidget()
         self.analysis = AnalysisTab(self)
@@ -68,14 +75,19 @@ class MainWindow(QMainWindow):
         self.bot = BotTab(self)
         self.settings_tab = SettingsTab(self)
         self.telegram_tab = TelegramTab(self)
+        self.intel_tab = IntelTab(self)
+        self.research_tab = ResearchTab(self)
         self.tabs.addTab(self.analysis, "📈  Piyasa Analizi")
         self.tabs.addTab(self.scanner, "🔎  Tarayıcı")
         self.tabs.addTab(self.backtest, "🧪  Backtest")
+        self.tabs.addTab(self.intel_tab, "🧠  Zeka Motoru")
+        self.tabs.addTab(self.research_tab, "🔬  Araştırma")
         self.tabs.addTab(self.bot, "🤖  Bot")
         self.tabs.addTab(self.telegram_tab, "📨  Telegram")
         self.tabs.addTab(self.settings_tab, "⚙  Ayarlar")
         self.setCentralWidget(self.tabs)
         self.bridge.event.connect(self.bot.on_event, Qt.ConnectionType.QueuedConnection)
+        self.bridge.event.connect(self._route_event, Qt.ConnectionType.QueuedConnection)
 
         self.net_badge = QLabel()
         self.statusBar().addPermanentWidget(self.net_badge)
@@ -127,6 +139,10 @@ class MainWindow(QMainWindow):
     def trade_client(self) -> BinanceClient:
         s = self.settings
         return BinanceClient(s.api_key, s.api_secret, testnet=s.testnet)
+
+    def _route_event(self, kind: str, payload):
+        if kind == "decision":
+            self.intel_tab.on_live_decision(payload)
 
     def telegram_ready(self) -> bool:
         s = self.settings

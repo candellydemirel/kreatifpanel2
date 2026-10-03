@@ -27,44 +27,18 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class BotEngine:
-    def __init__(self, client, broker, strategy: Strategy, risk: RiskSettings, symbols: list[str],
-                 interval: str, quote_asset: str = "USDT", poll_seconds: float = 30,
-                 state_path: str | Path | None = None,
-                 on_event: Callable[[str, object], None] | None = None,
-                 kline_limit: int = 300):
-        self.client = client
-        self.broker = broker
-        self.strategy = strategy
-        self.risk = risk
-        self.rm = RiskManager(risk)
-        self.symbols = [s.strip().upper() for s in symbols if s.strip()]
-        self.interval = interval
-        self.quote_asset = quote_asset.upper()
+class EngineCore:
+    """Klasik ve Zeka motorlarının ortak altyapısı: iş parçacığı, olaylar ve kayıt."""
+
+    poll_seconds: float = 30.0
+    on_event: Callable[[str, object], None] | None = None
+
+    def _init_core(self, poll_seconds: float, on_event):
         self.poll_seconds = max(5.0, float(poll_seconds))
-        self.state_path = Path(state_path) if state_path else None
         self.on_event = on_event
-        self.kline_limit = max(kline_limit, strategy.min_bars() + 20)
-
-        self.positions: dict[str, Position] = {}
-        self.trades: list[ClosedTrade] = []
-        self.last_prices: dict[str, float] = {}
-        self.last_signals: dict[str, dict] = {}
-        self._last_bar: dict[str, pd.Timestamp] = {}
-        self._day = None
-        self._day_start_equity = 0.0
-        self.halted_today = False
-
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._lock = threading.RLock()
-
-        bad = [s for s in self.symbols if not s.endswith(self.quote_asset)]
-        if bad:
-            raise ValueError(f"Bu semboller {self.quote_asset} ile bitmiyor: {', '.join(bad)}")
-        if not self.symbols:
-            raise ValueError("En az bir sembol girin.")
-        self._load_state()
 
     # ------------------------------------------------------------------ olaylar
     def _emit(self, kind: str, payload=None):
@@ -90,7 +64,7 @@ class BotEngine:
         if self.running:
             return
         self._stop.clear()
-        self._thread = threading.Thread(target=self._run, name="KreatifBotEngine", daemon=True)
+        self._thread = threading.Thread(target=self._run, name=type(self).__name__, daemon=True)
         self._thread.start()
 
     def stop(self, wait: bool = False):
@@ -98,10 +72,11 @@ class BotEngine:
         if wait and self._thread:
             self._thread.join(timeout=30)
 
+    def start_message(self) -> str:
+        return "Bot başlatıldı"
+
     def _run(self):
-        mode = "CANLI" if getattr(self.broker, "is_live", False) else "KAĞIT (simülasyon)"
-        self.log(f"Bot başlatıldı | Mod: {mode} | Strateji: {self.strategy.name} | "
-                 f"Semboller: {', '.join(self.symbols)} | Aralık: {self.interval}")
+        self.log(self.start_message())
         self._emit("status", "running")
         while not self._stop.is_set():
             try:
@@ -112,6 +87,49 @@ class BotEngine:
             self._stop.wait(self.poll_seconds)
         self.log("Bot durduruldu.")
         self._emit("status", "stopped")
+
+    def tick(self):
+        raise NotImplementedError
+
+
+class BotEngine(EngineCore):
+    def __init__(self, client, broker, strategy: Strategy, risk: RiskSettings, symbols: list[str],
+                 interval: str, quote_asset: str = "USDT", poll_seconds: float = 30,
+                 state_path: str | Path | None = None,
+                 on_event: Callable[[str, object], None] | None = None,
+                 kline_limit: int = 300):
+        self.client = client
+        self.broker = broker
+        self.strategy = strategy
+        self.risk = risk
+        self.rm = RiskManager(risk)
+        self.symbols = [s.strip().upper() for s in symbols if s.strip()]
+        self.interval = interval
+        self.quote_asset = quote_asset.upper()
+        self._init_core(poll_seconds, on_event)
+        self.state_path = Path(state_path) if state_path else None
+        self.kline_limit = max(kline_limit, strategy.min_bars() + 20)
+
+        self.positions: dict[str, Position] = {}
+        self.trades: list[ClosedTrade] = []
+        self.last_prices: dict[str, float] = {}
+        self.last_signals: dict[str, dict] = {}
+        self._last_bar: dict[str, pd.Timestamp] = {}
+        self._day = None
+        self._day_start_equity = 0.0
+        self.halted_today = False
+
+        bad = [s for s in self.symbols if not s.endswith(self.quote_asset)]
+        if bad:
+            raise ValueError(f"Bu semboller {self.quote_asset} ile bitmiyor: {', '.join(bad)}")
+        if not self.symbols:
+            raise ValueError("En az bir sembol girin.")
+        self._load_state()
+
+    def start_message(self) -> str:
+        mode = "CANLI" if getattr(self.broker, "is_live", False) else "KAĞIT (simülasyon)"
+        return (f"Bot başlatıldı | Mod: {mode} | Strateji: {self.strategy.name} | "
+                f"Semboller: {', '.join(self.symbols)} | Aralık: {self.interval}")
 
     # ------------------------------------------------------------------ ana döngü
     def tick(self):
