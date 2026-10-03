@@ -534,6 +534,15 @@ class BotTab(QWidget):
         self.universe_size.setValue(s.universe_size)
         self.universe_size.setSuffix(" coin")
         mf.addRow("Taranacak coinler", self.auto_universe)
+        self.hard_tp = QDoubleSpinBox()
+        self.hard_tp.setRange(0, 1000)
+        self.hard_tp.setDecimals(1)
+        self.hard_tp.setValue(s.hard_take_profit_pct)
+        self.hard_tp.setSuffix(" %")
+        self.hard_tp.setSpecialValueText("Kapalı")
+        self.hard_tp.setToolTip("Açık pozisyon bu kâra ulaştığı anda (fiyat giriş fiyatının bu kadar üstünde) "
+                                "her durumda tamamı satılır. 0 = kapalı.")
+        mf.addRow("Kesin kâr al", self.hard_tp)
         mf.addRow("Coin sayısı (hacimli mod)", self.universe_size)
         mf.addRow("Mum aralığı", self.interval)
         mf.addRow("Kontrol sıklığı", self.poll)
@@ -723,6 +732,7 @@ class BotTab(QWidget):
         s.intel_leverage = self.leverage.value()
         s.universe_mode = self.auto_universe.currentData()
         s.universe_size = self.universe_size.value()
+        s.hard_take_profit_pct = self.hard_tp.value()
         self.ctx.persist()
         return s
 
@@ -731,7 +741,7 @@ class BotTab(QWidget):
         self.stop_btn.setEnabled(running)
         for w in (self.paper, self.live, self.paper_balance, self.reset_paper, self.symbols, self.interval,
                   self.poll, self.strategy, self.risk, self.engine_type, self.intel_market, self.leverage,
-                  self.auto_universe, self.universe_size):
+                  self.auto_universe, self.universe_size, self.hard_tp):
             w.setEnabled(not running)
         if not running:
             self._engine_changed()
@@ -866,6 +876,7 @@ class BotTab(QWidget):
         cfg.market = s.intel_market
         cfg.quote_asset = s.quote_asset
         cfg.risk.leverage = min(s.intel_leverage, cfg.risk.max_leverage) if cfg.market != "SPOT" else 1
+        cfg.risk.hard_take_profit_pct = s.hard_take_profit_pct
         errors = cfg.validate()
         if errors:
             self.ctx.show_error("Zeka Motoru ayarları geçersiz", "\n".join(errors))

@@ -165,6 +165,17 @@ def update_on_bar(pos: ManagedPosition, row: pd.Series, cfg: RiskConfig, bar_ope
         pos.qty = 0.0
         return actions
 
+    # 1b) Kesin kâr hedefi: pozisyon yüzde X kâra ulaşınca koşulsuz tamamı satılır
+    hard = float(getattr(cfg, "hard_take_profit_pct", 0) or 0)
+    if hard > 0:
+        lev = max(1, int(pos.leverage or 1)) if pos.market != "SPOT" else 1
+        target = pos.entry_price * (1 + s * hard / 100 / lev)
+        if (favorable >= target) if s > 0 else (favorable <= target):
+            px = max(op, target) if s > 0 else min(op, target)
+            actions.append(ExitAction(ExitReason.TP_HIT, pos.qty, px, True, f"%{hard:g} kâr hedefi"))
+            pos.qty = 0.0
+            return actions
+
     # 2) Kâr al seviyeleri (kısmi)
     for k, tp in enumerate(pos.tp_levels):
         if tp.hit:

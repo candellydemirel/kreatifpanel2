@@ -97,3 +97,23 @@ def test_telegram_buttons(tmp_path):
     assert req.state == "APPROVED" and tg.removed == [7] and "Onaylandı" in tg.answers[-1]
     eng.tick()
     assert "BTCUSDT" in eng.positions
+
+
+def test_hard_take_profit_sells_everything_at_15pct():
+    import pandas as pd
+
+    from kreatifbot.intel.config import RiskConfig
+    from kreatifbot.intel.position_manager import open_position, update_on_bar
+    cfg = RiskConfig()
+    assert cfg.hard_take_profit_pct == 15.0
+    pos = open_position("XUSDT", "SPOT", "LONG", 100.0, 1.0, 90.0, [130.0, 140.0], [0.5, 0.5], "s",
+                        "2026-01-01T00:00:00+00:00", 0, 0, 0, 70, "BULL", "id")
+    acts = update_on_bar(pos, pd.Series({"open": 110, "high": 114.9, "low": 109, "close": 114, "atr": 1.0}), cfg)
+    assert not acts and pos.qty == 1.0
+    acts = update_on_bar(pos, pd.Series({"open": 114, "high": 116, "low": 113, "close": 115.5, "atr": 1.0}), cfg)
+    assert len(acts) == 1 and acts[0].full and acts[0].qty == 1.0 and abs(acts[0].price - 115.0) < 1e-9
+    assert "%15" in acts[0].note
+    cfg.hard_take_profit_pct = 0                     # kapalı
+    pos2 = open_position("XUSDT", "SPOT", "LONG", 100.0, 1.0, 90.0, [130.0], [1.0], "s",
+                         "2026-01-01T00:00:00+00:00", 0, 0, 0, 70, "BULL", "id2")
+    assert not update_on_bar(pos2, pd.Series({"open": 114, "high": 116, "low": 113, "close": 115, "atr": 1.0}), cfg)

@@ -126,6 +126,9 @@ class RiskConfig:
     # Küçük hesap (ör. 20 USDT): risk tabanlı boyut Binance'in en küçük emir tutarının altında kalırsa
     # pozisyon en küçük tutara yükseltilir; ancak bu işlemdeki risk sermayenin bu yüzdesini aşamaz.
     small_account_max_risk_pct: float = 1.5
+    # Kesin kâr hedefi: pozisyon bu yüzde kâra ulaşınca (futures'ta kaldıraçlı getiri) koşulsuz tamamen
+    # satılır. 0 = kapalı.
+    hard_take_profit_pct: float = 15.0
 
 
 @dataclass

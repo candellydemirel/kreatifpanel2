@@ -112,6 +112,7 @@ class Settings:
     intel_leverage: int = 1
     universe_mode: str = "all"           # manual | top (hacimli+hareketli N coin) | all (bütün likit USDT çiftleri)
     universe_size: int = 15
+    hard_take_profit_pct: float = 15.0   # Zeka Motoru: bu kâra ulaşan pozisyon her durumda satılır (0 = kapalı)
     minimize_to_tray: bool = True        # Pencere kapatılınca tepside çalışmaya devam et
     prevent_sleep: bool = True           # Bot çalışırken Windows uykuya geçmesin
     autostart: bool = False              # Windows açılınca uygulamayı başlat
