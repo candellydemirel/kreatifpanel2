@@ -566,6 +566,22 @@ def test_decision_object_and_no_trade(prepared):
     assert all(o.direction == "NONE" for o in outs if not o.is_trade)
 
 
+def test_learned_risk_only_reduces_size(prepared):
+    eng, prep = prepared
+    i = next(i for i in range(300, len(prep.f)) if eng.decide(prep, i).is_trade)
+    base = eng.decide(prep, i)
+    try:
+        eng.learned = {base.strategy: (0.25, "test: zarar eden strateji")}
+        low = eng.decide(prep, i)
+        eng.learned = {base.strategy: (5.0, "geçersiz büyük değer")}
+        capped = eng.decide(prep, i)
+    finally:
+        eng.learned = {}
+    assert low.is_trade and low.risk_percent < base.risk_percent
+    assert any("Öğrenilen risk" in r for r in low.reasons)
+    assert capped.risk_percent <= base.risk_percent + 1e-12
+
+
 def test_decision_data_quality_and_safety(prepared):
     eng, prep = prepared
     from kreatifbot.intel.data_quality import QualityReport

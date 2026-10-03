@@ -128,13 +128,14 @@ def _fmt(x, nd=6):
 class DecisionEngine:
     def __init__(self, cfg: IntelConfig, strategies: list[IntelStrategy] | None = None,
                  meta_model: MetaModel | None = None, strategy_stats: dict | None = None,
-                 health: dict | None = None):
+                 health: dict | None = None, learned: dict | None = None):
         self.cfg = cfg
         self.strategies = strategies if strategies is not None else build_strategies(cfg)
         self.by_key = {s.key: s for s in self.strategies}
         self.meta = meta_model
         self.stats = strategy_stats or {}
         self.health = health or {}
+        self.learned = learned or {}          # strateji -> (öğrenilen risk çarpanı ≤ 1, gerekçe)
 
     # ------------------------------------------------------------------ hazırlık (vektörel)
     def prepare(self, entry_df: pd.DataFrame, symbol: str, interval: str | None = None,
@@ -432,8 +433,11 @@ class DecisionEngine:
         stage = self.stage_of(primary_key)
         if live and stage not in (LifecycleStage.LIMITED_LIVE, LifecycleStage.FULL_LIVE):
             return no_trade(NoTradeReason.STRATEGY_NOT_LIVE, f"{primary.name} aşaması {stage.value}")
+        learned_mult, learned_why = self.learned.get(primary_key, (1.0, ""))
+        if learned_why:
+            d.reasons.append(f"Öğrenilen risk çarpanı {learned_mult:.2f}: {learned_why}")
         sz = position_size(equity, entry, stop, cfg.risk, confidence, primary.spec.risk_multiplier *
-                           cfg.strategy(primary_key).risk_multiplier, rr.high_vol or rt.size_mult < 1,
+                           cfg.strategy(primary_key).risk_multiplier * min(1.0, learned_mult), rr.high_vol or rt.size_mult < 1,
                            prep.market, available_balance, open_exposure, STAGE_RISK_CAP.get(stage, 1.0))
         d.warnings += sz.warnings
         if not sz.ok:

@@ -83,6 +83,38 @@ FAMILY_TR = {
 }
 STYLE_TR = {"intraday": "Gün içi", "scalp": "Kısa vadeli (scalp)", "swing": "Birkaç gün (swing)"}
 
+# Kullanıcıya "bu ne demek?" açıklamaları (araç ipuçlarında gösterilir)
+EXPLAIN_TR = {
+    "adx": "ADX trendin GÜCÜNÜ ölçer (yönünü değil). 25 üstü güçlü trend demektir.",
+    "breakout": "Fiyat önemli bir seviyeyi (direnç/destek, aralık sınırı) hacimle geçince işleme girer.",
+    "derivatives": "Vadeli piyasa verisi kullanır: fonlama oranı, açık pozisyon (OI), tasfiyeler.",
+    "ema": "Hareketli ortalamalar fiyatın ortalama yönünü gösterir; fiyat ortalamanın üstündeyse eğilim yukarıdır.",
+    "macd": "İki hareketli ortalamanın farkı; momentumun hızlanıp yavaşladığını gösterir.",
+    "mean_reversion": "Fiyat ortalamadan aşırı uzaklaşınca geri döneceğine oynar. Yatay piyasada iyi, "
+                      "güçlü trendde tehlikelidir.",
+    "meta": "Birden çok stratejinin/zaman diliminin uyumuna bakan birleşik strateji.",
+    "momentum": "Hızlı yükselen fiyatın bir süre daha yükselmeye devam edeceğine oynar.",
+    "orderflow": "Alıcı ve satıcıların gerçek emir akışına (agresif alım/satım hacmi) bakar.",
+    "statistical": "İstatistiksel sapmaya (z-skor) bakar; ortalamadan kaç standart sapma uzakta olduğunu ölçer.",
+    "structure": "Piyasa yapısı: yükselen dipler/tepeler, yapı kırılımı (BOS), yön değişimi (CHoCH).",
+    "supertrend": "ATR tabanlı trend takip göstergesi; fiyatın altında yeşil çizgi yükseliş trendi demektir.",
+    "volatility": "Oynaklık sıkışıp genişlediğinde oluşan sert hareketleri yakalar.",
+    "vwap": "Hacim ağırlıklı ortalama fiyat; kurumsal alıcıların referans seviyesi.",
+    "intraday": "Gün içi: pozisyon genellikle birkaç saat açık kalır.",
+    "scalp": "Kısa vadeli: pozisyon dakikalar ile 1-2 saat arasında kapanır.",
+    "swing": "Birkaç gün: pozisyon günlerce açık kalabilir.",
+    "ACTIVE": "Strateji normal çalışıyor.",
+    "DEGRADED": "Son işlemlerde performansı düştü; daha seçici davranılır.",
+    "PAUSED": "Son işlemlerde zarar etti; bot bu stratejiyle yeni işlem açmaz (otomatik bakım tekrar değerlendirir).",
+    "risk": "Risk çarpanı (sizin ayarınız): 1,00 = temel riskin tamamı. Yalnızca azaltılabilir, asla artırılamaz.",
+    "learned": "Öğrenilen risk: bot bunu otomatik bakımda gerçek Binance geçmiş verisiyle (komisyon ve kayma "
+               "dahil) kendisi hesaplar. Zarar eden stratejinin riskini düşürür, istikrarlı kâr edene tam risk "
+               "verir. Kullanılan risk = sizin ayarınız × öğrenilen risk.",
+    "stage": "Aşama: stratejinin hangi seviyede çalıştığı. Kağıt işlem = simülasyon. Canlı işlem yalnızca "
+             "'Sınırlı canlı' ve 'Tam canlı' aşamalarında olur; canlıya geçişi güvenlik için siz onaylarsınız.",
+    "regimes": "Bu strateji bu piyasa koşullarında çalışmak üzere tasarlandı; diğer koşullarda devre dışı kalır.",
+}
+
 LISTING_KIND_TR = {"NEW_SYMBOL": "Yeni işlem çifti", "NOW_TRADING": "İşleme açıldı", "ANNOUNCED": "Duyuruldu",
                    "HALTED": "İşlem durduruldu", "STATUS": "Durum değişti"}
 

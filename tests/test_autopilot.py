@@ -101,3 +101,37 @@ def test_engine_starts_maintenance_thread(tmp_path, monkeypatch):
         time.sleep(0.05)
     eng.stop(wait=True)
     assert calls
+
+
+def test_learned_risk_rules():
+    from types import SimpleNamespace
+
+    from kreatifbot.intel.research import learned_risk
+
+    def t(key, pnl):
+        return SimpleNamespace(to_dict=lambda: {"strategy": key, "net_pnl": pnl})
+    trades = ([t("good", 3.0)] * 15 + [t("good", -1.0)] * 10 + [t("bad", 1.0)] * 5 + [t("bad", -2.0)] * 10
+              + [t("few", 5.0)] * 3)
+    lr = learned_risk(trades, ["good", "bad", "few", "none"])
+    assert lr["good"][0] == 1.0 and lr["bad"][0] == 0.25 and lr["few"][0] == 0.5 and lr["none"][0] == 0.5
+    assert all(0 < m <= 1.0 for m, _ in lr.values())  # çarpan riski asla artırmaz
+
+
+def test_maintenance_learns_and_persists_risk():
+    from kreatifbot.intel.autopilot import load_learned
+    df = with_taker(make_ohlcv(2000, seed=5))
+    c = HistClient(df)
+    res = run_maintenance(_cfg(), ["BTCUSDT"], c, c)
+    assert res.learned and all(0 < m <= 1.0 for m, _ in res.learned.values())
+    assert load_learned() == {k: (float(m), w) for k, (m, w) in res.learned.items()}
+    assert "Öğrenilen risk" in res.summary()
+
+
+def test_learned_risk_not_written_without_data():
+    from kreatifbot.intel.autopilot import load_learned
+
+    class Empty:
+        def klines(self, *a, **k):
+            return pd.DataFrame()
+    res = run_maintenance(_cfg(), ["BTCUSDT"], Empty(), Empty())
+    assert not res.learned and load_learned() == {}

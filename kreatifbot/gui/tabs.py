@@ -896,7 +896,7 @@ class BotTab(QWidget):
             on_event, holder = self._event_sink()
             try:
                 de = DecisionEngine(cfg, meta_model=self.ctx.intel_meta, strategy_stats=self.ctx.intel_stats,
-                                    health=self.ctx.intel_health)
+                                    health=self.ctx.intel_health, learned=self.ctx.intel_learned)
                 news = None
                 if cfg.news.enabled or cfg.listing.enabled or cfg.catalyst.enabled:
                     from .news_tab import build_monitor

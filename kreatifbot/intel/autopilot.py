@@ -11,6 +11,7 @@ Veri alınamazsa o sembol atlanır; sahte veri veya sahte sonuç kullanılmaz.
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -18,6 +19,7 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 
+from ..config import data_dir
 from ..utils import INTERVALS
 from .backtest import run_intel_backtest, strategy_stats_from_trades
 from .config import IntelConfig
@@ -25,7 +27,7 @@ from .decision import DecisionEngine
 from .features import compute_features
 from .market_data import load_history
 from .ml import auc, brier
-from .research import label_candidates, strategy_health, train_meta
+from .research import label_candidates, learned_risk, strategy_health, train_meta
 from .types import StrategyHealth
 
 logger = logging.getLogger("kreatifbot.intel.autopilot")
@@ -37,6 +39,7 @@ class MaintenanceResult:
     metas: dict = field(default_factory=dict)        # sembol -> MetaModel (yalnızca doğrulamayı geçenler)
     stats: dict = field(default_factory=dict)        # strateji -> istatistik
     health: dict = field(default_factory=dict)       # strateji -> ACTIVE/DEGRADED/PAUSED
+    learned: dict = field(default_factory=dict)      # strateji -> (öğrenilen risk çarpanı, gerekçe)
     lines: list = field(default_factory=list)
     errors: list = field(default_factory=list)
 
@@ -50,6 +53,11 @@ class MaintenanceResult:
             extra.append("Duraklatılan: " + ", ".join(paused))
         if degraded:
             extra.append("Zayıflayan: " + ", ".join(degraded))
+        if self.learned:
+            full = sum(1 for m, _ in self.learned.values() if m >= 1.0)
+            low = sum(1 for m, _ in self.learned.values() if m <= 0.25)
+            extra.append(f"Öğrenilen risk: {full} strateji tam risk, {low} strateji çeyrek risk, "
+                         f"{len(self.learned) - full - low} strateji arada")
         return "\n".join([head] + extra + self.lines + [f"Hata: {e}" for e in self.errors])
 
 
@@ -103,6 +111,10 @@ def run_maintenance(cfg: IntelConfig, symbols: list[str], spot=None, futures=Non
         except Exception as exc:  # noqa: BLE001 - bir sembolün hatası bakımı durdurmasın
             logger.exception("bakım hatası")
             res.errors.append(f"{sym}: {exc}")
+    if len(res.errors) < len(symbols):               # en az bir sembolde gerçek veri işlendi
+        keys = [s.key for s in (strategies if strategies is not None else DecisionEngine(cfg).strategies)]
+        res.learned = learned_risk(all_trades, keys)
+        save_learned(res.learned)
     if all_trades:
         interval = cfg.timeframes.entry
         res.stats = strategy_stats_from_trades(all_trades, interval)
@@ -112,3 +124,25 @@ def run_maintenance(cfg: IntelConfig, symbols: list[str], spot=None, futures=Non
     res.finished_at = datetime.now(timezone.utc).isoformat()
     _ = pd
     return res
+
+
+def learned_path():
+    return data_dir() / "learned_risk.json"
+
+
+def save_learned(learned: dict) -> None:
+    try:
+        payload = {"updated_at": datetime.now(timezone.utc).isoformat(),
+                   "risk": {k: {"mult": m, "why": w} for k, (m, w) in learned.items()}}
+        learned_path().write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Öğrenilen risk kaydedilemedi: %s", exc)
+
+
+def load_learned() -> dict[str, tuple[float, str]]:
+    """Son bakımda öğrenilen risk çarpanları (dosya yoksa boş → çarpan uygulanmaz)."""
+    try:
+        data = json.loads(learned_path().read_text(encoding="utf-8"))
+        return {k: (min(1.0, max(0.0, float(v["mult"]))), str(v.get("why", ""))) for k, v in data["risk"].items()}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}

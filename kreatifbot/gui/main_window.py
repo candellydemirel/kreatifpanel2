@@ -102,6 +102,8 @@ class MainWindow(QMainWindow):
         self.intel_meta = None
         self.intel_stats = None
         self.intel_health = None
+        from ..intel.autopilot import load_learned
+        self.intel_learned = load_learned()      # otomatik bakımda öğrenilen risk çarpanları
         self.intel_last_decision = None
 
         self.tabs = QTabWidget()
@@ -240,6 +242,9 @@ class MainWindow(QMainWindow):
                 self.intel_tab._fill_strategies()
             if payload.stats:
                 self.intel_stats = payload.stats
+            if payload.learned:
+                self.intel_learned = payload.learned
+                self.intel_tab._fill_strategies()
             self.status(payload.summary().splitlines()[0])
         elif kind == "insight":
             self.news_tab.add_live_insight(payload)

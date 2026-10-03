@@ -9,19 +9,26 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 from PySide6.QtCore import Qt, Slot
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QMessageBox, QPlainTextEdit, QPushButton, QSpinBox,
     QSplitter, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
-from ..i18n import tr, tr_reason
+from ..i18n import EXPLAIN_TR, tr, tr_reason
 from ..intel.config import IntelConfig, config_from_dict, load_intel_config, save_intel_config
 from ..intel.strategies import REGISTRY
 from .widgets import GREEN, RED, combo_symbol, fill_table, make_table, signal_color, stage_combo
 
 if TYPE_CHECKING:
     from .main_window import MainWindow
+
+
+def _tip(text: str, tip: str = "") -> QTableWidgetItem:
+    item = QTableWidgetItem(text)
+    if tip:
+        item.setToolTip(tip)
+    return item
 
 
 def mono() -> QFont:
@@ -157,9 +164,11 @@ class IntelTab(QWidget):
         # --- Strateji yönetimi
         st_page = QWidget()
         stl = QVBoxLayout(st_page)
-        self.st_table = QTableWidget(0, 8)
+        self.st_table = QTableWidget(0, 9)
         self.st_table.setHorizontalHeaderLabels(["Açık", "Strateji", "Aile", "Stil", "Aşama", "Risk çarpanı",
-                                                 "Sağlık", "Tercih edilen rejimler (LONG)"])
+                                                 "Öğrenilen risk", "Sağlık", "Tercih edilen rejimler (LONG)"])
+        for col, key in ((4, "stage"), (5, "risk"), (6, "learned"), (8, "regimes")):
+            self.st_table.horizontalHeaderItem(col).setToolTip(EXPLAIN_TR[key])
         self.st_table.verticalHeader().setVisible(False)
         st_btns = QHBoxLayout()
         save_st = QPushButton("Strateji ayarlarını kaydet")
@@ -268,23 +277,39 @@ class IntelTab(QWidget):
     def _fill_strategies(self):
         self.st_table.setRowCount(len(REGISTRY))
         health = self.ctx.intel_health or {}
+        learned = self.ctx.intel_learned or {}
         for r, (key, cls) in enumerate(REGISTRY.items()):
             sc = self.cfg.strategy(key)
             cb = QCheckBox()
             cb.setChecked(sc.enabled)
             self.st_table.setCellWidget(r, 0, cb)
-            self.st_table.setItem(r, 1, QTableWidgetItem(f"{cls.spec.name} ({key})"))
-            self.st_table.setItem(r, 2, QTableWidgetItem(tr(cls.spec.family)))
-            self.st_table.setItem(r, 3, QTableWidgetItem(tr(cls.spec.style)))
+            sp = cls.spec
+            self.st_table.setItem(r, 1, _tip(f"{sp.name} ({key})", "\n".join(
+                x for x in (f"Giriş: {sp.entry}" if sp.entry else "", f"Onay: {sp.confirmation}" if sp.confirmation
+                            else "", f"Geçersizleşme: {sp.invalidation}" if sp.invalidation else "",
+                            f"Çıkış: {sp.exit}" if sp.exit else "") if x)))
+            self.st_table.setItem(r, 2, _tip(tr(sp.family), EXPLAIN_TR.get(sp.family, "")))
+            self.st_table.setItem(r, 3, _tip(tr(sp.style), EXPLAIN_TR.get(sp.style, "")))
             stage = stage_combo(sc.stage)
+            stage.setToolTip(EXPLAIN_TR["stage"])
             self.st_table.setCellWidget(r, 4, stage)
             rm = QDoubleSpinBox()
             rm.setRange(0.1, 1.0)
             rm.setSingleStep(0.1)
             rm.setValue(min(1.0, sc.risk_multiplier))
+            rm.setToolTip(EXPLAIN_TR["risk"])
             self.st_table.setCellWidget(r, 5, rm)
-            self.st_table.setItem(r, 6, QTableWidgetItem(tr(str(health.get(key, "ACTIVE")))))
-            self.st_table.setItem(r, 7, QTableWidgetItem(", ".join(sorted(tr(x.value) for x in cls.spec.preferred))))
+            if key in learned:
+                lm, why = learned[key]
+                item = _tip(f"{lm:.2f}", why)
+                item.setForeground(QColor(GREEN if lm >= 1.0 else RED if lm <= 0.25 else "#d29922"))
+            else:
+                item = _tip("Henüz yok", "Otomatik pilot açıkken ilk bakım bitince bot bu değeri kendisi öğrenir.")
+            self.st_table.setItem(r, 6, item)
+            h = str(health.get(key, "ACTIVE"))
+            self.st_table.setItem(r, 7, _tip(tr(h), EXPLAIN_TR.get(h, "")))
+            self.st_table.setItem(r, 8, _tip(", ".join(sorted(tr(x.value) for x in sp.preferred)),
+                                             EXPLAIN_TR["regimes"]))
             self.st_table.item(r, 1).setData(Qt.ItemDataRole.UserRole, key)
         self.st_table.resizeColumnsToContents()
 
@@ -340,7 +365,8 @@ class IntelTab(QWidget):
             dq = check_candles(bundle.entry, cfg.timeframes.entry, cfg.data_quality,
                                min_history=min(cfg.data_quality.min_history_bars, bars - 10))
             dq.merge(check_orderbook(book, cfg.data_quality), "orderbook: ")
-            de = DecisionEngine(cfg, meta_model=meta, strategy_stats=stats, health=health)
+            de = DecisionEngine(cfg, meta_model=meta, strategy_stats=stats, health=health,
+                                learned=self.ctx.intel_learned)
             btc_f = None
             if bundle.btc_trend is not None and not bundle.btc_trend.empty:
                 from ..intel.features import compute_features

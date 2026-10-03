@@ -531,6 +531,38 @@ def strategy_health(trades: list, recent: int = 20, baseline_trades: list | None
     return pd.DataFrame(rows)
 
 
+def learned_risk(trades: list, keys: list | None = None, min_trades: int = 10) -> dict[str, tuple[float, str]]:
+    """Gerçek geçmiş veriyle yapılan backtest sonuçlarından (maliyet dahil) her strateji için risk çarpanı.
+
+    Çarpan yalnızca riski AZALTIR (0.25-1.0): az örnekte temkinli, zarar edende çok düşük,
+    istikrarlı kâr edende tam risk. Sonuç bir olasılık değerlendirmesidir, kâr garantisi değildir.
+    """
+    out: dict[str, tuple[float, str]] = {}
+    df = pd.DataFrame([t.to_dict() for t in trades]) if trades else pd.DataFrame()
+    groups = dict(tuple(df.groupby("strategy"))) if not df.empty else {}
+    for key in sorted(set(keys or []) | set(groups)):
+        g = groups.get(key)
+        if g is None or len(g) == 0:
+            out[key] = (0.5, "Geçmiş testte hiç işlem yok → temkinli yarım risk")
+            continue
+        n = len(g)
+        gp, gl = g.loc[g["net_pnl"] > 0, "net_pnl"].sum(), -g.loc[g["net_pnl"] <= 0, "net_pnl"].sum()
+        pf = gp / gl if gl > 0 else (math.inf if gp > 0 else 0.0)
+        net = g["net_pnl"].sum()
+        pf_txt = "∞" if math.isinf(pf) else f"{pf:.2f}"
+        if n < min_trades:
+            out[key] = (0.5, f"Yalnızca {n} işlem (en az {min_trades} gerekli) → temkinli yarım risk")
+        elif net <= 0 or pf < 1.0:
+            out[key] = (0.25, f"{n} işlemde maliyet sonrası zarar (kâr faktörü {pf_txt}) → çeyrek risk")
+        elif pf < 1.3:
+            out[key] = (0.5, f"{n} işlemde zayıf kâr (kâr faktörü {pf_txt}) → yarım risk")
+        elif pf < 1.7 or n < 20:
+            out[key] = (0.75, f"{n} işlemde kâr (kâr faktörü {pf_txt}) → %75 risk")
+        else:
+            out[key] = (1.0, f"{n} işlemde istikrarlı kâr (kâr faktörü {pf_txt}) → tam risk")
+    return out
+
+
 def holding_recommendation(trades: list, interval: str, min_winners: int = 10) -> pd.DataFrame:
     if not trades:
         return pd.DataFrame()

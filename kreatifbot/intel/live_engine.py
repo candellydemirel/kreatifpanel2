@@ -66,6 +66,9 @@ class IntelligentBotEngine(EngineCore):
         self.broker = venue  # GUI/Telegram uyumluluğu (is_live)
         self.store = store
         self.engine = decision_engine or DecisionEngine(cfg)
+        if not self.engine.learned:
+            from .autopilot import load_learned
+            self.engine.learned = load_learned()
         self.interval = cfg.timeframes.entry
         self.quote_asset = cfg.quote_asset
         self.strategy = SimpleNamespace(name=f"Zeka Motoru ({'Futures' if self.market != 'SPOT' else 'Spot'})")
@@ -142,6 +145,8 @@ class IntelligentBotEngine(EngineCore):
                 self.engine.stats = res.stats
             if res.health:
                 self.engine.health = res.health
+            if res.learned:
+                self.engine.learned = res.learned
             self.maintenance_result = res
         for line in res.summary().splitlines():
             self.log(line)
