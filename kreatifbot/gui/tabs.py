@@ -675,11 +675,21 @@ class BotTab(QWidget):
 
     # ---------------------------------------------------------------- başlat / durdur
     @Slot()
-    def start(self):
+    def start(self, unattended: bool = False):
+        """unattended=True: açılışta otomatik başlatma (onay pencereleri gösterilmez;
+        canlı modda yalnızca kullanıcı bunu Ayarlar'da bilinçli olarak onayladıysa çalışır)."""
         if self.engine and self.engine.running:
             return
         s = self._collect()
         live = s.live_mode
+        if unattended and live and not s.unattended_live_confirmed:
+            self.ctx.status("Canlı mod için otomatik başlatma onaylanmamış; bot başlatılmadı.")
+            self.log.appendPlainText("[Otomatik başlatma] Canlı modda onay verilmediği için bot başlatılmadı.")
+            return
+        self._unattended = unattended
+        if self.is_intel():
+            self._start_intel(s, live)
+            return
         if live:
             if not s.api_key or not s.api_secret:
                 self.ctx.show_error("API anahtarı yok", "Canlı işlem için Ayarlar sekmesinden API anahtarlarını girin.")
@@ -689,15 +699,13 @@ class BotTab(QWidget):
                     f"Semboller: {', '.join(s.symbols)}<br>Strateji: {self.strategy.combo.currentText()}<br>"
                     f"İşlem başı risk: %{s.risk['risk_per_trade_pct']}, maks. pozisyon: %{s.risk['max_position_pct']}"
                     "<br><br>Kripto işlemleri yüksek risk içerir ve kayıp yaşayabilirsiniz. Devam edilsin mi?")
-            box = QMessageBox(QMessageBox.Icon.Warning, "Canlı işlem onayı", text,
-                              QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, self)
-            box.setDefaultButton(QMessageBox.StandardButton.No)
-            if box.exec() != QMessageBox.StandardButton.Yes:
-                return
+            if not unattended:
+                box = QMessageBox(QMessageBox.Icon.Warning, "Canlı işlem onayı", text,
+                                  QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, self)
+                box.setDefaultButton(QMessageBox.StandardButton.No)
+                if box.exec() != QMessageBox.StandardButton.Yes:
+                    return
 
-        if self.is_intel():
-            self._start_intel(s, live)
-            return
         # Kağıt işlemde gerçek piyasa fiyatları (Ayarlar'a göre), canlıda işlem yapılan ağ kullanılır.
         client = self.ctx.trade_client() if live else self.ctx.data_client()
         strategy, risk = self.strategy.create(), self.risk.settings()
@@ -811,11 +819,12 @@ class BotTab(QWidget):
                     f"Canlı izinli stratejiler: {', '.join(live_strats) or 'YOK (hiç işlem açılmaz)'}<br>"
                     f"Kaldıraç: {cfg.risk.leverage}x, işlem başı risk %{cfg.risk.risk_per_trade_pct}<br><br>"
                     "Kaldıraçlı işlemler tasfiye riski taşır. Devam edilsin mi?")
-            box = QMessageBox(QMessageBox.Icon.Warning, "Canlı işlem onayı", text,
-                              QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, self)
-            box.setDefaultButton(QMessageBox.StandardButton.No)
-            if box.exec() != QMessageBox.StandardButton.Yes:
-                return
+            if not getattr(self, "_unattended", False):
+                box = QMessageBox(QMessageBox.Icon.Warning, "Canlı işlem onayı", text,
+                                  QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, self)
+                box.setDefaultButton(QMessageBox.StandardButton.No)
+                if box.exec() != QMessageBox.StandardButton.Yes:
+                    return
         st = self.ctx.settings
         if live:
             spot = self.ctx.trade_client()
@@ -1024,12 +1033,48 @@ class SettingsTab(QWidget):
         help_text.setWordWrap(True)
         help_text.setTextFormat(Qt.TextFormat.RichText)
 
+        bg = QGroupBox("Arka planda çalışma (bu bilgisayar)")
+        bgl = QVBoxLayout(bg)
+        self.tray = QCheckBox("Pencere kapatılınca sistem tepsisinde çalışmaya devam et")
+        self.tray.setChecked(s.minimize_to_tray)
+        self.nosleep = QCheckBox("Bot çalışırken bilgisayarın uykuya geçmesini engelle (ekran kapanabilir)")
+        self.nosleep.setChecked(s.prevent_sleep)
+        self.autostart = QCheckBox("Windows açılınca KreatifBot'u başlat (tepside)")
+        self.autostart.setChecked(s.autostart)
+        self.autobot = QCheckBox("Uygulama açılınca botu son ayarlarla otomatik başlat")
+        self.autobot.setChecked(s.start_bot_on_launch)
+        self.autolive = QCheckBox("Canlı modda da onay sormadan otomatik başlat (riskli)")
+        self.autolive.setChecked(s.unattended_live_confirmed)
+        self.autolive.toggled.connect(self._confirm_autolive)
+        for w in (self.tray, self.nosleep, self.autostart, self.autobot, self.autolive):
+            bgl.addWidget(w)
+        bg_note = QLabel("Not: Dizüstü bilgisayarlarda kapak kapanınca uyku Windows güç ayarlarından da kapatılmalı. "
+                         "Spot pozisyonların stop/hedefleri uygulama açıkken izlenir; Telegram bildirimleriyle "
+                         "uzaktan takip edebilirsiniz.")
+        bg_note.setWordWrap(True)
+        bg_note.setStyleSheet("color:#8b949e;")
+        bgl.addWidget(bg_note)
+
         layout = QVBoxLayout(self)
         layout.addWidget(box)
+        layout.addWidget(bg)
         layout.addLayout(buttons)
         layout.addWidget(self.result)
         layout.addWidget(self.balances, 1)
         layout.addWidget(help_text)
+
+    def _confirm_autolive(self, on: bool):
+        if not on or self.ctx.settings.unattended_live_confirmed:
+            return
+        answer = QMessageBox.warning(
+            self, "Canlı modda otomatik başlatma",
+            "Bu seçenek açıkken uygulama (ör. elektrik kesintisi sonrası) açıldığında bot CANLI modda onay "
+            "sormadan gerçek emir göndermeye başlar.\n\nYalnızca ayarlarınızı test ettiyseniz açın. Devam edilsin mi?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        if answer != QMessageBox.StandardButton.Yes:
+            self.autolive.blockSignals(True)
+            self.autolive.setChecked(False)
+            self.autolive.blockSignals(False)
 
     def reload(self):
         """API penceresinden yapılan değişiklikleri alanlara yansıt."""
@@ -1046,6 +1091,17 @@ class SettingsTab(QWidget):
         s.testnet = self.testnet.isChecked()
         s.mainnet_data = self.mainnet_data.isChecked()
         s.quote_asset = self.quote.currentText()
+        s.minimize_to_tray = self.tray.isChecked()
+        s.prevent_sleep = self.nosleep.isChecked()
+        s.start_bot_on_launch = self.autobot.isChecked()
+        s.unattended_live_confirmed = self.autolive.isChecked()
+        if self.autostart.isChecked() != s.autostart:
+            from ..system import set_autostart
+            if set_autostart(self.autostart.isChecked()) or not self.autostart.isChecked():
+                s.autostart = self.autostart.isChecked()
+            else:
+                self.autostart.setChecked(False)
+                self.ctx.status("Otomatik başlatma yalnızca Windows'ta ayarlanabilir.")
         self.ctx.persist()
         self.ctx.settings_changed()
         self.ctx.status("Ayarlar kaydedildi.")

@@ -3,6 +3,7 @@
 Kullanım:
     python main.py              -> uygulamayı açar
     python main.py --self-test  -> pencereyi açıp kapatır (kurulum/derleme kontrolü)
+    python main.py --minimized  -> sistem tepsisinde başlar (Windows ile otomatik başlatma)
 """
 
 import os
@@ -14,6 +15,7 @@ os.environ.setdefault("PYQTGRAPH_QT_LIB", "PySide6")
 
 def main() -> int:
     self_test = "--self-test" in sys.argv
+    minimized = "--minimized" in sys.argv
 
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication, QMessageBox
@@ -35,10 +37,16 @@ def main() -> int:
 
     sys.excepthook = excepthook
 
-    window = MainWindow(prompt_api=not self_test)
-    window.show()
+    app.setQuitOnLastWindowClosed(False)  # tepsiye küçülünce uygulama kapanmasın
+    window = MainWindow(prompt_api=not self_test, start_hidden=minimized)
+    if minimized and window.tray is not None:
+        window.tray.showMessage("KreatifBot", "Arka planda başlatıldı.")
+    else:
+        window.show()
     if self_test:
         QTimer.singleShot(1500, app.quit)
+    elif window.settings.start_bot_on_launch:
+        QTimer.singleShot(2000, lambda: window.bot.start(unattended=True))
     return app.exec()
 
 

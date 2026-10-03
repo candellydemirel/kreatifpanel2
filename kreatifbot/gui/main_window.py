@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QObject, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QAction, QColor, QDesktopServices, QPalette
-from PySide6.QtWidgets import QApplication, QLabel, QMainWindow, QMessageBox, QStyleFactory, QTabWidget
+from PySide6.QtGui import QAction, QColor, QDesktopServices, QFont, QIcon, QPainter, QPalette, QPixmap
+from PySide6.QtWidgets import (
+    QApplication, QLabel, QMainWindow, QMenu, QMessageBox, QStyleFactory, QSystemTrayIcon, QTabWidget,
+)
 
 from .. import __version__
 from ..binance_client import BinanceClient
 from ..config import GUIDE_PDF, Settings, data_dir, load_settings, resource_path, save_settings
+from ..system import prevent_sleep
 from .api_dialog import ApiKeyDialog
 from ..telegram import TelegramClient, TelegramNotifier
 from .tabs import AnalysisTab, BacktestTab, BotTab, ScannerTab, SettingsTab
@@ -53,9 +56,31 @@ def apply_dark_theme(app: QApplication):
     """)
 
 
+def app_icon(running: bool = False) -> QIcon:
+    """Basit uygulama simgesi (çalışırken yeşil, dururken mavi)."""
+    pm = QPixmap(64, 64)
+    pm.fill(Qt.GlobalColor.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setBrush(QColor("#26a69a" if running else "#1f6feb"))
+    p.setPen(Qt.PenStyle.NoPen)
+    p.drawEllipse(2, 2, 60, 60)
+    p.setPen(QColor("white"))
+    f = QFont()
+    f.setBold(True)
+    f.setPixelSize(38)
+    p.setFont(f)
+    p.drawText(pm.rect(), Qt.AlignmentFlag.AlignCenter, "K")
+    p.end()
+    return QIcon(pm)
+
+
 class MainWindow(QMainWindow):
-    def __init__(self, prompt_api: bool = False):
+    def __init__(self, prompt_api: bool = False, start_hidden: bool = False):
         super().__init__()
+        self._force_quit = False
+        self._tray_hint_shown = False
+        self.setWindowIcon(app_icon())
         self.setWindowTitle(f"KreatifBot {__version__} — Binance Trading Bot")
         self.resize(1440, 900)
         self.settings: Settings = load_settings()
@@ -92,9 +117,10 @@ class MainWindow(QMainWindow):
         self.net_badge = QLabel()
         self.statusBar().addPermanentWidget(self.net_badge)
         self._build_menu()
+        self._build_tray()
         self.settings_changed()
         self.status(f"Hazır. Veri klasörü: {data_dir()}")
-        if prompt_api and not self.settings.api_key:
+        if prompt_api and not self.settings.api_key and not start_hidden:
             QTimer.singleShot(400, lambda: self.open_api_dialog(first_run=True))
 
     def _build_menu(self):
@@ -113,6 +139,56 @@ class MainWindow(QMainWindow):
             "<br><br>Yatırım tavsiyesi değildir. Kripto işlemleri yüksek risk içerir."))
         for action in (guide, folder, about):
             help_menu.addAction(action)
+
+    # ---------------------------------------------------------------- sistem tepsisi
+    def _build_tray(self):
+        self.tray = None
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+        tray = QSystemTrayIcon(app_icon(), self)
+        menu = QMenu(self)
+        self._tray_show = QAction("Pencereyi göster", self)
+        self._tray_show.triggered.connect(self.show_from_tray)
+        self._tray_toggle = QAction("Botu başlat", self)
+        self._tray_toggle.triggered.connect(self._tray_toggle_bot)
+        quit_action = QAction("Çıkış", self)
+        quit_action.triggered.connect(self.quit_app)
+        for a in (self._tray_show, self._tray_toggle):
+            menu.addAction(a)
+        menu.addSeparator()
+        menu.addAction(quit_action)
+        tray.setContextMenu(menu)
+        tray.setToolTip("KreatifBot — bot durduruldu")
+        tray.activated.connect(lambda reason: self.show_from_tray()
+                               if reason in (QSystemTrayIcon.ActivationReason.Trigger,
+                                             QSystemTrayIcon.ActivationReason.DoubleClick) else None)
+        tray.show()
+        self.tray = tray
+
+    def show_from_tray(self):
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def _tray_toggle_bot(self):
+        if self._bot_running:
+            self.bot.stop()
+        else:
+            self.show_from_tray()
+            self.tabs.setCurrentWidget(self.bot)
+            self.bot.start()
+
+    def quit_app(self):
+        if self._bot_running:
+            self.show_from_tray()
+            answer = QMessageBox.question(
+                self, "Çıkış", "Bot çalışıyor. Durdurup uygulamadan tamamen çıkılsın mı?\n"
+                "(Açık pozisyonlar kaydedilir; spot pozisyonların stop/hedefleri uygulama kapalıyken izlenmez.)")
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        self._force_quit = True
+        self.close()
+        QApplication.instance().quit()
 
     def open_api_dialog(self, first_run: bool = False):
         if self._bot_running:
@@ -196,12 +272,28 @@ class MainWindow(QMainWindow):
 
     def set_bot_running(self, running: bool):
         self._bot_running = running
+        prevent_sleep(running and self.settings.prevent_sleep)
+        if self.tray is not None:
+            self.tray.setIcon(app_icon(running))
+            self.tray.setToolTip("KreatifBot — bot çalışıyor" if running else "KreatifBot — bot durduruldu")
+            self._tray_toggle.setText("Botu durdur" if running else "Botu başlat")
+        self.setWindowIcon(app_icon(running))
         self.settings_tab.setEnabled(not running)
         self.telegram_tab.setEnabled(not running)
 
     # ---------------------------------------------------------------- kapanış
     def closeEvent(self, event):
-        if self._bot_running:
+        if not self._force_quit and self.tray is not None and self.settings.minimize_to_tray:
+            # Pencereyi gizle, bot arka planda çalışmaya devam etsin
+            event.ignore()
+            self.hide()
+            if not self._tray_hint_shown:
+                self._tray_hint_shown = True
+                self.tray.showMessage("KreatifBot arka planda çalışıyor",
+                                      "Simgeye tıklayarak açabilir, sağ tık → Çıkış ile kapatabilirsiniz.",
+                                      QSystemTrayIcon.MessageIcon.Information, 5000)
+            return
+        if self._bot_running and not self._force_quit:
             answer = QMessageBox.question(
                 self, "Çıkış", "Bot çalışıyor. Durdurup çıkmak istiyor musunuz?\n"
                 "(Açık pozisyonlar kaydedilir ve bot yeniden başlatıldığında takip edilmeye devam eder.)")
@@ -209,5 +301,11 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
         self.bot.shutdown()
+        prevent_sleep(False)
+        if self.tray is not None:
+            self.tray.hide()
         self.tasks.pool.waitForDone(3000)
         event.accept()
+        app = QApplication.instance()
+        if app is not None and not app.quitOnLastWindowClosed():
+            app.quit()

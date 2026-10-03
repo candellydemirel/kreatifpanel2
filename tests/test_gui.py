@@ -307,3 +307,69 @@ def test_bot_tab_starts_intel_engine_paper(app, window, monkeypatch):
     bot.stop()
     assert wait(app, lambda: not bot.engine.running, timeout=40)
     assert not window.errors
+
+
+# ---------------------------------------------------------------- arka planda çalışma
+def test_system_helpers_are_safe_off_windows():
+    from kreatifbot import system
+    if not system.is_windows():
+        assert system.prevent_sleep(True) is False
+        assert system.set_autostart(True) is False and system.autostart_enabled() is False
+    cmd = system.launch_command()
+    assert "--minimized" in cmd and "main.py" in cmd
+
+
+def test_close_hides_to_tray_and_sleep_prevention(app, window, monkeypatch):
+    from unittest.mock import MagicMock
+
+    from PySide6.QtGui import QAction
+
+    from kreatifbot.gui import main_window
+    calls = []
+    monkeypatch.setattr(main_window, "prevent_sleep", lambda on: calls.append(on))
+    window.tray = MagicMock()
+    window._tray_toggle = QAction("x", window)
+    window.settings.minimize_to_tray = True
+    window.close()
+    assert not window.isVisible() and window.tray.showMessage.called  # gizlendi, kapanmadı
+    window.show_from_tray()
+    assert window.isVisible()
+    window.set_bot_running(True)
+    window.set_bot_running(False)
+    assert calls == [True, False]
+    assert window._tray_toggle.text() == "Botu başlat"
+    window.settings.prevent_sleep = False
+    window.set_bot_running(True)
+    assert calls[-1] is False
+    window.set_bot_running(False)
+    window.tray = None
+
+
+def test_unattended_start_rules(app, window, monkeypatch):
+    bot = window.bot
+    # Canlı modda onay verilmemişse otomatik başlatma yapılmaz
+    bot.live.setChecked(True)
+    window.settings.unattended_live_confirmed = False
+    bot.start(unattended=True)
+    assert bot.engine is None and "onay verilmediği" in bot.log.toPlainText()
+    # Kağıt modda otomatik başlar, onay penceresi açılmaz
+    monkeypatch.setattr(QMessageBox, "exec", lambda *a: (_ for _ in ()).throw(AssertionError("pencere açıldı")))
+    bot.paper.setChecked(True)
+    bot.engine_type.setCurrentIndex(bot.engine_type.findData("classic"))
+    bot.symbols.setText("BTCUSDT")
+    bot.start(unattended=True)
+    assert wait(app, lambda: bot.engine is not None and bot.engine.running)
+    bot.stop()
+    assert wait(app, lambda: not bot.engine.running, timeout=40)
+
+
+def test_background_settings_saved(app, window):
+    t = window.settings_tab
+    t.tray.setChecked(False)
+    t.nosleep.setChecked(False)
+    t.autobot.setChecked(True)
+    t.save()
+    from kreatifbot.config import load_settings
+    s = load_settings()
+    assert (s.minimize_to_tray, s.prevent_sleep, s.start_bot_on_launch) == (False, False, True)
+    assert s.autostart is False  # Windows dışında ayarlanamaz

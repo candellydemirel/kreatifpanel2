@@ -87,6 +87,15 @@ Uygulamada üst menüdeki **🔑 Binance API Anahtarı** butonuna tıklayın (il
 - 🔒 **Para çekme iznini asla açmayın**, mümkünse IP kısıtlaması ekleyin.
 - Gizli anahtar bilgisayarınızda Windows DPAPI ile şifrelenmiş olarak saklanır: `%APPDATA%\KreatifBot\settings.json`.
 
+## 🖥 Bilgisayarınızda 7/24 çalıştırma
+**Ayarlar → Arka planda çalışma** bölümünden:
+- **Sistem tepsisi:** pencereyi kapatınca bot durmaz; saatin yanındaki **K** simgesinde çalışır (yeşil = bot çalışıyor). Simgeye tıklayınca pencere açılır, sağ tık → **Çıkış** ile tamamen kapanır.
+- **Uyku engeli:** bot çalışırken Windows uykuya geçmez (ekran kapanabilir). Dizüstünde kapak kapatma ayarını Windows güç seçeneklerinden de "Hiçbir şey yapma" yapın.
+- **Windows ile başlat:** bilgisayar açılınca uygulama tepside başlar.
+- **Botu otomatik başlat:** uygulama açılınca bot son ayarlarla başlar (elektrik kesintisi / yeniden başlatma sonrası). Canlı modda bu, ayrıca onay verilmedikçe çalışmaz.
+
+Uygulama kapalıyken spot pozisyonların stop/hedefleri izlenmez (futures'ta borsa tarafında koruyucu stop vardır). Uzaktan takip için Telegram bildirimlerini açın. Kalıcı 7/24 çalışma için ileride bir Windows VPS önerilir.
+
 ## 📨 Telegram bildirimleri
 1. Telegram'da **@BotFather** → `/newbot` → bota ad ve sonu `bot` ile biten kullanıcı adı verin, **token**'ı kopyalayın.
 2. Yeni botunuzu açıp **/start** yazın.

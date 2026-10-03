@@ -109,6 +109,11 @@ class Settings:
     engine_type: str = "classic"         # classic | intel
     intel_market: str = "SPOT"           # SPOT | USDM_FUTURES
     intel_leverage: int = 1
+    minimize_to_tray: bool = True        # Pencere kapatılınca tepside çalışmaya devam et
+    prevent_sleep: bool = True           # Bot çalışırken Windows uykuya geçmesin
+    autostart: bool = False              # Windows açılınca uygulamayı başlat
+    start_bot_on_launch: bool = False    # Uygulama açılınca botu otomatik başlat
+    unattended_live_confirmed: bool = False  # Canlı modda onaysız otomatik başlatmaya izin (bilinçli onay)
     telegram_enabled: bool = False
     telegram_token: str = ""
     telegram_chat_id: str = ""
