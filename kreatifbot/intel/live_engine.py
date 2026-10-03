@@ -95,6 +95,9 @@ class IntelligentBotEngine(EngineCore):
         self.last_insights: list = []
         self._last_insight_scan = 0.0
         self._tradable_bases: set = set()
+        self.metas: dict = {}
+        self.maintenance_result = None
+        self._maint_thread = None
         self._load_state()
 
     # ------------------------------------------------------------------ yardımcılar
@@ -103,6 +106,46 @@ class IntelligentBotEngine(EngineCore):
         tf = self.cfg.timeframes
         return (f"Zeka Motoru başlatıldı | {self.market} | Mod: {mode} | Semboller: {', '.join(self.symbols)} | "
                 f"Giriş {tf.entry}, onay {tf.confirmation}, trend {tf.trend}, ana {tf.major}, makro {tf.macro}")
+
+    # ------------------------------------------------------------------ otomatik pilot bakımı
+    def start(self):
+        super().start()
+        if self.cfg.autopilot.enabled and (self._maint_thread is None or not self._maint_thread.is_alive()):
+            import threading
+            self._maint_thread = threading.Thread(target=self._maintenance_loop, name="IntelMaintenance",
+                                                  daemon=True)
+            self._maint_thread.start()
+
+    def _maintenance_loop(self):
+        ap = self.cfg.autopilot
+        if self._stop.wait(ap.first_run_delay_s):
+            return
+        while not self._stop.is_set():
+            self.run_maintenance_now()
+            if self._stop.wait(ap.retrain_hours * 3600):
+                return
+
+    def run_maintenance_now(self):
+        from .autopilot import run_maintenance
+        self.log("Otomatik bakım başladı (gerçek Binance verisiyle istatistik, sağlık ve meta model)")
+        spot = self.client if self.market == "SPOT" else None
+        fut = self.futures if self.market == "SPOT" else (self.futures or self.client)
+        try:
+            res = run_maintenance(self.cfg, self.symbols, spot, fut, strategies=self.engine.strategies)
+        except Exception as exc:  # noqa: BLE001 - bakım hatası ticareti durdurmasın
+            self.log(f"Otomatik bakım hatası: {exc}", logging.WARNING)
+            return None
+        with self._lock:
+            self.metas = res.metas
+            if res.stats:
+                self.engine.stats = res.stats
+            if res.health:
+                self.engine.health = res.health
+            self.maintenance_result = res
+        for line in res.summary().splitlines():
+            self.log(line)
+        self._emit("maintenance", res)
+        return res
 
     def _api_error(self, exc):
         self._api_errors.append(time.time())
@@ -295,6 +338,9 @@ class IntelligentBotEngine(EngineCore):
             corr = return_correlation(closes)
         ob = orderbook_features(book) if book else None
         live = bool(self.venue.is_live)
+        if self.maintenance_result is not None:
+            # Otomatik bakımdan sonra: doğrulanmış model varsa onu, yoksa deterministik mod
+            self.engine.meta = self.metas.get(symbol)
         news_ctx = self.news.context(symbol) if self.news is not None else None
         d = self.engine.decide(prep, i, equity=ps.equity, open_exposure=self._exposure(), portfolio=ps,
                                rules=rules, book_stats=ob, live=live, dq=dq, has_position=symbol in self.positions,
@@ -359,6 +405,8 @@ class IntelligentBotEngine(EngineCore):
             self._tradable_bases = {x.get("baseAsset") for x in symbols
                                     if x.get("quoteAsset") == self.quote_asset and x.get("status") == "TRADING"}
         new_items, events = self.news.poll(symbols)
+        self._emit("news_polled", {"new": len(new_items), "events": len(events),
+                                   "status": dict(self.news.source_status)})
         watched = {s[:-len(self.quote_asset)] for s in set(self.symbols) | set(self.positions)}
         for it in new_items:
             relevant = bool(set(it.symbols) & watched)

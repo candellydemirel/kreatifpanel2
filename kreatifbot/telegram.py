@@ -250,6 +250,8 @@ class TelegramNotifier:
             if ins.catalyst.headlines:
                 text += f"\n{esc(ins.catalyst.headlines[0][:200])}"
             return text + "\n<i>Yatırım tavsiyesi değildir.</i>"
+        if kind == "maintenance" and self.notify["status"]:
+            return "🛠 " + esc(payload.summary()[:3000])
         if kind == "halt" and self.notify["risk"]:
             return f"⛔ <b>Günlük zarar limiti aşıldı</b>\n{esc(payload)}\nBugün yeni pozisyon açılmayacak."
         if kind == "alert" and self.notify["errors"] and isinstance(payload, dict):

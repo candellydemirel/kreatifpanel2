@@ -4,6 +4,19 @@ Binance Spot piyasası için piyasa analizi, tarama, backtest ve otomatik işlem
 
 > ⚠️ **Uyarı:** Bu yazılım yatırım tavsiyesi vermez ve hiçbir strateji kâr garantisi vermez. Önce **Kağıt işlem** ve **Testnet** ile deneyin. Kaybetmeyi göze alamayacağınız parayla işlem yapmayın.
 
+## 🚀 Otomatik Pilot (önerilen kullanım)
+**Bot** sekmesindeki **🚀 Otomatik Pilotu Başlat** düğmesine bir kez basın. Sonrasında hiçbir şeye elle basmanız gerekmez; her şey birlikte ve senkronize çalışır:
+
+| Ne | Ne sıklıkla |
+|---|---|
+| Zeka Motoru kararları, pozisyon yönetimi (SL/TP/trailing/süre) | Her mum kapanışında / her döngüde |
+| Haber taraması, Binance listeleme/delist tespiti | 2 dakikada bir |
+| Yeni listeleme stratejisi | Listeleme sonrası sürekli |
+| Öngörüler (katalizör + temel + teknik) ve gerçekleşen getirileri | 30 dakikada bir |
+| Otomatik bakım: strateji istatistikleri, strateji sağlığı (bozulanlar duraklatılır), meta model yeniden eğitimi | Başlangıçtan 30 sn sonra ve 24 saatte bir |
+
+Meta model yalnızca **son verideki ayrı bir doğrulama penceresinde** (örneklem dışı AUC ≥ 0.55) başarılı olursa devreye girer; aksi halde deterministik modda devam edilir. Ekranlar (Haberler, Öngörüler, Zeka Motoru) bottan gelen olaylarla kendiliğinden güncellenir; Telegram açıksa her şey telefonunuza gelir. Otomatik Pilot açıkken uygulama her açıldığında (Windows ile otomatik başlatma dahil) kendiliğinden devam eder. Canlı modda bu otomatik devam için Ayarlar'da ayrıca onay gerekir.
+
 ## Özellikler
 
 | Sekme | Ne yapar? |

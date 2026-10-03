@@ -222,6 +222,15 @@ class MainWindow(QMainWindow):
     def _route_event(self, kind: str, payload):
         if kind == "decision":
             self.intel_tab.on_live_decision(payload)
+        elif kind == "news_polled":
+            self.news_tab.on_news_polled(payload)
+        elif kind == "maintenance":
+            if payload.health:
+                self.intel_health = payload.health
+                self.intel_tab._fill_strategies()
+            if payload.stats:
+                self.intel_stats = payload.stats
+            self.status(payload.summary().splitlines()[0])
         elif kind == "insight":
             self.news_tab.add_live_insight(payload)
             if payload.signal == "AL":

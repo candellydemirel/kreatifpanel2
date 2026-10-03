@@ -106,7 +106,8 @@ class Settings:
     paper_balance: float = 1000.0
     poll_seconds: int = 30
     live_mode: bool = False
-    engine_type: str = "classic"         # classic | intel
+    engine_type: str = "intel"           # classic | intel
+    autopilot: bool = False              # Tek tuşla tam otomatik çalışma (her açılışta devam eder)
     intel_market: str = "SPOT"           # SPOT | USDM_FUTURES
     intel_leverage: int = 1
     minimize_to_tray: bool = True        # Pencere kapatılınca tepside çalışmaya devam et

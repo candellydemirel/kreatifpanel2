@@ -44,6 +44,7 @@ class NewsTab(QWidget):
         self.refresh_btn = QPushButton("🔄 Haberleri ve listelemeleri tara")
         self.refresh_btn.clicked.connect(self.refresh)
         self.auto = QCheckBox("Otomatik (2 dk)")
+        self.auto.setToolTip("Bot Zeka Motoru ile çalışırken haberleri bot tarar; bu ekran kendiliğinden güncellenir.")
         self.auto.toggled.connect(self._toggle_auto)
         self.category = QComboBox()
         self.category.addItems(["Tümü", "LISTING", "DELISTING", "FUTURES_LISTING", "LAUNCHPOOL", "HACK",
@@ -206,6 +207,7 @@ class NewsTab(QWidget):
         self.timer.setInterval(120_000)
         self.timer.timeout.connect(self.refresh)
         self._load_cached()
+        self.auto.setChecked(True)
 
     # ---------------------------------------------------------------- veri
     def _load_cached(self):
@@ -225,10 +227,21 @@ class NewsTab(QWidget):
         else:
             self.timer.stop()
 
+    def bot_handles_news(self) -> bool:
+        eng = getattr(self.ctx.bot, "engine", None)
+        return bool(eng is not None and eng.running and getattr(eng, "news", None) is not None)
+
+    def on_news_polled(self, info: dict):
+        self._load_cached()
+        self.sources.setText(f"[Bot] {info.get('new', 0)} yeni haber, {info.get('events', 0)} listeleme olayı. "
+                             "Kaynaklar: " + " | ".join(f"{k}: {v}" for k, v in info.get("status", {}).items()))
+
     @Slot()
-    def refresh(self):
+    def refresh(self, manual: bool = True):
         if not self.refresh_btn.isEnabled():
             return
+        if self.sender() is self.timer and self.bot_handles_news():
+            return  # bot zaten tarıyor; çift istek yapma
         settings, cfg = self.ctx.settings, load_intel_config()
         self.refresh_btn.setEnabled(False)
         self.sources.setText("Kaynaklar taranıyor...")

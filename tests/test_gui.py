@@ -106,6 +106,7 @@ def test_backtest_and_compare(app, window):
 
 def test_bot_paper_run(app, window):
     bot = window.bot
+    bot.engine_type.setCurrentIndex(bot.engine_type.findData("classic"))
     bot.paper.setChecked(True)
     bot.symbols.setText("BTCUSDT, ETHUSDT")
     bot.poll.setValue(5)
@@ -166,6 +167,7 @@ def test_bot_sends_telegram(app, window):
     fake = FakeTelegram()
     window.make_notifier = lambda: TelegramNotifier(TelegramClient("T", session=fake), "42", commands=False)
     bot = window.bot
+    bot.engine_type.setCurrentIndex(bot.engine_type.findData("classic"))
     bot.paper.setChecked(True)
     bot.symbols.setText("BTCUSDT")
     bot.start()
@@ -413,3 +415,26 @@ def test_news_tab_insights(app, window, monkeypatch):
     assert tab.ins_table.item(0, 0).text() == "ABCUSDT"
     assert "Katalizör" in tab.ins_detail.toPlainText()
     assert not window.errors
+
+
+def test_autopilot_button_runs_everything(app, window, monkeypatch):
+    fm = _patch_intel_network(monkeypatch)
+    cfg = _intel_cfg_1h()
+    cfg.use_futures_context = False
+    cfg.autopilot.enabled = False  # testte ağır bakımı çalıştırma
+    from kreatifbot.intel.config import save_intel_config
+    save_intel_config(cfg)
+    window.data_client = lambda: fm
+    bot = window.bot
+    bot.engine_type.setCurrentIndex(bot.engine_type.findData("classic"))
+    bot.paper.setChecked(True)
+    bot.symbols.setText("BTCUSDT")
+    bot.toggle_autopilot()
+    s = window.settings
+    assert s.autopilot and s.start_bot_on_launch and bot.engine_type.currentData() == "intel"
+    assert wait(app, lambda: bot.engine is not None and bot.engine.running, timeout=30)
+    assert getattr(bot.engine, "news", None) is not None  # haber + listeleme + öngörü birlikte
+    assert "AÇIK" in bot.autopilot_btn.text()
+    bot.toggle_autopilot()
+    assert wait(app, lambda: not bot.engine.running, timeout=40)
+    assert not s.autopilot and not s.start_bot_on_launch and not window.settings_tab.autobot.isChecked()

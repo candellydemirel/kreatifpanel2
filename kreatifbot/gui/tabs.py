@@ -527,6 +527,8 @@ class BotTab(QWidget):
         self.risk = RiskForm()
         self.risk.set_settings(s.risk_settings)
 
+        self.autopilot_btn = QPushButton()
+        self.autopilot_btn.clicked.connect(self.toggle_autopilot)
         self.start_btn = QPushButton("▶  Botu Başlat")
         self.start_btn.setStyleSheet(f"QPushButton {{background:{GREEN}; color:white; font-weight:bold; padding:8px;}}"
                                      "QPushButton:disabled {background:#30363d; color:#6e7681;}")
@@ -545,6 +547,7 @@ class BotTab(QWidget):
         ll = QVBoxLayout(left)
         ll.setContentsMargins(0, 0, 0, 0)
         ll.addWidget(_scroll(panel, 380))
+        ll.addWidget(self.autopilot_btn)
         ll.addWidget(self.start_btn)
         ll.addWidget(self.stop_btn)
 
@@ -602,9 +605,49 @@ class BotTab(QWidget):
         QVBoxLayout(self).addWidget(split)
         self.refresh_network_label()
         self._engine_changed()
+        self._update_autopilot_button()
         self._load_history()
 
     # ---------------------------------------------------------------- yardımcılar
+    # ---------------------------------------------------------------- otomatik pilot
+    def _update_autopilot_button(self):
+        on = self.ctx.settings.autopilot
+        self.autopilot_btn.setText("🚀  Otomatik Pilot: AÇIK (kapatmak için tıkla)" if on else
+                                   "🚀  Otomatik Pilotu Başlat (her şey otomatik)")
+        color = "#8957e5" if on else "#1f6feb"
+        self.autopilot_btn.setStyleSheet(f"QPushButton {{background:{color}; color:white; font-weight:bold; "
+                                         "padding:10px;} QPushButton:disabled {background:#30363d;}")
+        self.autopilot_btn.setToolTip(
+            "Zeka Motoru + haberler + yeni listelemeler + öngörüler + günlük otomatik bakım birlikte çalışır. "
+            "Uygulama her açıldığında (Windows ile otomatik başlatma dahil) kendiliğinden devam eder.")
+
+    @Slot()
+    def toggle_autopilot(self):
+        s = self.ctx.settings
+        if s.autopilot:
+            s.autopilot = False
+            s.start_bot_on_launch = False
+            self.ctx.settings_tab.autobot.setChecked(False)
+            self.ctx.persist()
+            self._update_autopilot_button()
+            if self.engine and self.engine.running:
+                self.stop()
+            self.ctx.status("Otomatik pilot kapatıldı.")
+            return
+        self.engine_type.setCurrentIndex(self.engine_type.findData("intel"))
+        s.autopilot = True
+        s.start_bot_on_launch = True
+        self.ctx.settings_tab.autobot.setChecked(True)
+        self.ctx.persist()
+        self._update_autopilot_button()
+        self.log.appendPlainText("[Otomatik Pilot] Zeka Motoru, haberler, listelemeler, öngörüler ve otomatik "
+                                 "bakım birlikte başlatılıyor.")
+        if s.live_mode and not s.unattended_live_confirmed:
+            self.log.appendPlainText("[Otomatik Pilot] Not: canlı modda uygulama yeniden açıldığında otomatik devam "
+                                     "için Ayarlar'da 'Canlı modda da onay sormadan otomatik başlat' onayı gerekir.")
+        if not (self.engine and self.engine.running):
+            self.start()
+
     def is_intel(self) -> bool:
         return self.engine_type.currentData() == "intel"
 

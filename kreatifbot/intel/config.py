@@ -265,6 +265,17 @@ class CatalystConfig:
 
 
 @dataclass
+class AutopilotConfig:
+    enabled: bool = True                 # Bot çalışırken arka planda otomatik bakım
+    first_run_delay_s: int = 30
+    retrain_hours: float = 24.0          # Bakım (istatistik + sağlık + meta model) sıklığı
+    history_bars: int = 3000             # Bakımda kullanılan giriş TF mum sayısı (gerçek Binance verisi)
+    holdout_frac: float = 0.2            # Meta model doğrulaması için ayrılan son veri oranı
+    min_auc: float = 0.55                # Örneklem dışı AUC bu değerin altındaysa model devreye alınmaz
+    min_holdout_samples: int = 30
+
+
+@dataclass
 class IntelConfig:
     market: str = "SPOT"                 # SPOT | USDM_FUTURES
     quote_asset: str = "USDT"
@@ -284,6 +295,7 @@ class IntelConfig:
     news: NewsConfig = field(default_factory=NewsConfig)
     listing: ListingConfig = field(default_factory=ListingConfig)
     catalyst: CatalystConfig = field(default_factory=CatalystConfig)
+    autopilot: AutopilotConfig = field(default_factory=AutopilotConfig)
     strategies: dict = field(default_factory=dict)  # anahtar -> StrategyConfig
 
     def strategy(self, key: str) -> StrategyConfig:
