@@ -26,7 +26,10 @@ END = "# <<< KreatifBot entegrasyonu"
 
 
 def say(msg: str):
-    print(msg, flush=True)
+    try:
+        print(msg, flush=True)
+    except UnicodeEncodeError:                 # eski Windows konsolu (cp1252/cp857)
+        print(msg.encode("ascii", "replace").decode(), flush=True)
 
 
 def find_jarvis(arg: str | None) -> Path:
@@ -123,7 +126,9 @@ def verify(j: Path):
             "assert 'kreatif_bot_start' in n;"
             "import kreatifbot.headless, actions.kreatifbot_actions;"
             "print(len(n), 'araç hazır')")
-    r = subprocess.run([sys.executable, "-c", code], cwd=j, capture_output=True, text=True)
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+    r = subprocess.run([sys.executable, "-c", code], cwd=j, capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", env=env)
     if r.returncode != 0:
         raise SystemExit("Kontrol başarısız:\n" + (r.stderr or r.stdout)[-1500:] +
                          "\nGeri almak için .bak dosyalarını eski adlarına döndürün.")
@@ -131,6 +136,11 @@ def verify(j: Path):
 
 
 def main():
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     j = find_jarvis(sys.argv[1] if len(sys.argv) > 1 else None)
     say(f"jarvis2 klasörü: {j}")
     copy_files(j)
