@@ -22,8 +22,12 @@ LEVERAGED = re.compile(r"(UP|DOWN|BULL|BEAR)$")
 
 
 def select_universe(tickers: list[dict], quote: str = "USDT", n: int = 15, min_quote_volume: float = 20_000_000,
-                    tradable: set | None = None, always: list[str] | None = None) -> tuple[list[str], dict]:
-    """(semboller, sembol -> seçilme nedeni). `always` her zaman listede kalır (ör. açık pozisyonlar)."""
+                    tradable: set | None = None, always: list[str] | None = None,
+                    all_coins: bool = False) -> tuple[list[str], dict]:
+    """(semboller, sembol -> seçilme nedeni). `always` her zaman listede kalır (ör. açık pozisyonlar).
+
+    all_coins=True: hacim eşiğini geçen BÜTÜN coinler (hacme göre sıralı) döner; n yok sayılır.
+    """
     rows = []
     for t in tickers or []:
         sym = str(t.get("symbol", ""))
@@ -49,6 +53,12 @@ def select_universe(tickers: list[dict], quote: str = "USDT", n: int = 15, min_q
             out.append(sym)
             reasons[sym] = "Sizin listeniz / açık pozisyon"
     by_vol = sorted(rows, key=lambda r: -r[1])
+    if all_coins:
+        for sym, qv, chg in by_vol:
+            if sym not in out:
+                out.append(sym)
+                reasons[sym] = f"Hacim {qv / 1e6:.0f}M, %{chg:+.1f} (24s)"
+        return out, reasons
     by_move = sorted(rows, key=lambda r: -abs(r[2]))
     n_vol = max(1, n // 2)
     for sym, qv, chg in by_vol:
@@ -70,13 +80,14 @@ class UniverseSelector:
     """Coin listesini belirli aralıklarla Binance'ten yeniler."""
 
     def __init__(self, client, quote: str = "USDT", n: int = 15, min_quote_volume: float = 20_000_000,
-                 refresh_s: float = 3600, base_symbols: list[str] | None = None):
+                 refresh_s: float = 3600, base_symbols: list[str] | None = None, all_coins: bool = False):
         self.client = client
         self.quote = quote
         self.n = n
         self.min_quote_volume = min_quote_volume
         self.refresh_s = refresh_s
         self.base_symbols = list(base_symbols or [])
+        self.all_coins = all_coins
         self.last_refresh = 0.0
         self.reasons: dict[str, str] = {}
         self.status = "Henüz seçilmedi"
@@ -103,7 +114,8 @@ class UniverseSelector:
             return None
         always = list(dict.fromkeys(self.base_symbols + list(keep or [])))
         syms, reasons = select_universe(tickers if isinstance(tickers, list) else [], self.quote,
-                                        max(self.n, len(always)), self.min_quote_volume, tradable, always)
+                                        max(self.n, len(always)), self.min_quote_volume, tradable, always,
+                                        all_coins=self.all_coins)
         if len(syms) <= len(always) and not reasons:
             self.status = "Uygun coin bulunamadı; mevcut liste korunuyor"
             return None

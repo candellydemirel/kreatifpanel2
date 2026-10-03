@@ -65,6 +65,8 @@ class IntelligentBotEngine(EngineCore):
         if not_allowed:
             raise ValueError(f"İzin verilen sembol listesinde değil (Zeka Motoru ayarları): {', '.join(not_allowed)}")
         self.universe = universe              # otomatik coin seçimi (None → yalnızca elle girilen semboller)
+        self.batch_size = 25                  # Her turda derin analiz edilen coin sayısı (sırayla döner)
+        self._batch_pos = 0
         if cfg.timeframes.entry not in cfg.allowed_timeframes:
             raise ValueError(f"Giriş zaman dilimi izinli değil: {cfg.timeframes.entry}")
         self.market = cfg.market
@@ -196,6 +198,19 @@ class IntelligentBotEngine(EngineCore):
         self.log(" ".join(parts))
         self._summary_reset()
 
+    def _batch(self) -> list[str]:
+        """Bu turda incelenecek coinler: açık pozisyon/bekleyen emirler her turda, kalanı sırayla."""
+        if len(self.symbols) <= self.batch_size:
+            return list(self.symbols)
+        must = [s for s in self.symbols if s in self.positions or s in self.pending]
+        rest = [s for s in self.symbols if s not in must]
+        n = max(1, self.batch_size - len(must))
+        if self._batch_pos >= len(rest):
+            self._batch_pos = 0
+        part = rest[self._batch_pos:self._batch_pos + n]
+        self._batch_pos += n
+        return must + part
+
     def _universe_tick(self):
         if self.universe is None or not self.universe.due():
             return
@@ -206,9 +221,20 @@ class IntelligentBotEngine(EngineCore):
         added = [s for s in new if s not in self.symbols]
         removed = [s for s in self.symbols if s not in new]
         self.symbols = new
+        if len(new) > len(self._rules) and hasattr(self.client, "all_symbol_rules"):
+            try:                              # tek istekle bütün coinlerin emir kuralları
+                self._rules.update(self.client.all_symbol_rules(self.quote_asset))
+            except Exception as exc:  # noqa: BLE001 - kurallar yine tek tek alınabilir
+                logger.info("Toplu sembol kuralları alınamadı: %s", exc)
         if added or removed:
-            self.log(f"Otomatik coin seçimi ({len(new)} coin): " + ", ".join(
-                f"{s} ({self.universe.reasons.get(s, '')})" for s in new))
+            if len(new) > 40:
+                rounds = -(-len(new) // self.batch_size)
+                self.log(f"Otomatik coin seçimi: {len(new)} coin taranıyor (her turda {self.batch_size} coin, "
+                         f"tüm liste ~{rounds} turda bir; açık pozisyonlar her turda). En hacimliler: "
+                         + ", ".join(new[:10]))
+            else:
+                self.log(f"Otomatik coin seçimi ({len(new)} coin): " + ", ".join(
+                    f"{s} ({self.universe.reasons.get(s, '')})" for s in new))
             self._emit("universe", {"symbols": list(new), "reasons": dict(self.universe.reasons)})
 
     def _maintenance_loop(self):
@@ -226,7 +252,8 @@ class IntelligentBotEngine(EngineCore):
         spot = self.client if self.market == "SPOT" else None
         fut = self.futures if self.market == "SPOT" else (self.futures or self.client)
         try:
-            res = run_maintenance(self.cfg, self.symbols, spot, fut, strategies=self.engine.strategies)
+            res = run_maintenance(self.cfg, self.symbols[:max(1, self.cfg.autopilot.max_symbols)], spot, fut,
+                                  strategies=self.engine.strategies)
         except Exception as exc:  # noqa: BLE001 - bakım hatası ticareti durdurmasın
             self.log(f"Otomatik bakım hatası: {exc}", logging.WARNING)
             return None
@@ -320,7 +347,7 @@ class IntelligentBotEngine(EngineCore):
                 self._api_error(exc)
             except Exception as exc:  # noqa: BLE001
                 self.log(f"Listeleme kontrolü hatası: {exc}", logging.WARNING)
-            for symbol in self.symbols:
+            for symbol in self._batch():
                 if self._stop.is_set():
                     break
                 try:
@@ -647,7 +674,8 @@ class IntelligentBotEngine(EngineCore):
             self.log(f"{symbol}: fiyat stop'un altında, {strategy} sinyali iptal")
             return False
         sz = position_size(self.equity(), price, stop, self.cfg.risk, confidence, risk_mult, True, self.market,
-                           self.venue.available_balance(), self._exposure())
+                           self.venue.available_balance(), self._exposure(),
+                           min_notional=float(getattr(rules, "min_notional", 0) or 0))
         if not sz.ok:
             self.log(f"{symbol}: {strategy} boyutu hesaplanamadı ({'; '.join(sz.reasons)})")
             return False

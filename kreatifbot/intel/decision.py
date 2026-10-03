@@ -438,7 +438,8 @@ class DecisionEngine:
             d.reasons.append(f"Öğrenilen risk çarpanı {learned_mult:.2f}: {learned_why}")
         sz = position_size(equity, entry, stop, cfg.risk, confidence, primary.spec.risk_multiplier *
                            cfg.strategy(primary_key).risk_multiplier * min(1.0, learned_mult), rr.high_vol or rt.size_mult < 1,
-                           prep.market, available_balance, open_exposure, STAGE_RISK_CAP.get(stage, 1.0))
+                           prep.market, available_balance, open_exposure, STAGE_RISK_CAP.get(stage, 1.0),
+                           min_notional=float(getattr(rules, "min_notional", 0) or 0))
         d.warnings += sz.warnings
         if not sz.ok:
             return no_trade(NoTradeReason.POSITION_SIZE_FAILURE, "; ".join(sz.reasons) or "Boyut hesaplanamadı")

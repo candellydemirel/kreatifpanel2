@@ -271,7 +271,7 @@ class SizingResult:
 def position_size(equity: float, entry: float, stop: float, cfg: RiskConfig, confidence: float,
                   strategy_risk_mult: float = 1.0, high_vol: bool = False, market: str = "SPOT",
                   available_balance: float | None = None, open_exposure: list[OpenExposure] | None = None,
-                  stage_risk_cap: float = 1.0) -> SizingResult:
+                  stage_risk_cap: float = 1.0, min_notional: float = 0.0) -> SizingResult:
     """Risk tabanlı boyut: riskTutarı = sermaye × risk%; miktar = riskTutarı / stop mesafesi."""
     res = SizingResult(ok=False, leverage=cfg.leverage if market != "SPOT" else 1)
     dist = abs(entry - stop)
@@ -304,6 +304,21 @@ def position_size(equity: float, entry: float, stop: float, cfg: RiskConfig, con
         qty = notional / entry
         risk_amount = qty * dist
         risk_pct = risk_amount / equity * 100
+    if min_notional > 0 and 0 < notional < min_notional * 1.1:
+        # Küçük hesap: Binance en küçük emir tutarına yükselt (yuvarlama payı %10), risk sınırı aşılmamalı
+        target = min_notional * 1.1
+        new_qty = target / entry
+        new_risk_pct = new_qty * dist / equity * 100
+        if target > cap:
+            res.reasons.append(f"Bakiye en küçük emir tutarına ({min_notional:.2f}) yetmiyor")
+            return res
+        if new_risk_pct > cfg.small_account_max_risk_pct:
+            res.reasons.append(f"En küçük emir tutarı için risk %{new_risk_pct:.2f} > küçük hesap sınırı "
+                               f"%{cfg.small_account_max_risk_pct:.2f} (stop çok uzak)")
+            return res
+        res.warnings.append(f"Küçük hesap: pozisyon {notional:.2f} → {target:.2f} (Binance en küçük emir), "
+                            f"risk %{new_risk_pct:.2f}")
+        qty, notional, risk_amount, risk_pct = new_qty, target, new_qty * dist, new_risk_pct
     res.ok = qty > 0
     res.qty, res.notional, res.risk_amount, res.risk_pct = qty, notional, risk_amount, risk_pct
     return res

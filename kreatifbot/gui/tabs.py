@@ -519,18 +519,22 @@ class BotTab(QWidget):
         self.poll.setValue(s.poll_seconds)
         self.poll.setSuffix(" sn")
         mf.addRow("Semboller", self.symbols)
-        self.auto_universe = QCheckBox("Coinleri bot seçsin (hacimli + en çok hareket eden USDT çiftleri, saatlik)")
-        self.auto_universe.setChecked(s.auto_universe)
-        self.auto_universe.setToolTip("Zeka Motoru, Binance'teki USDT çiftlerinden yeterli hacmi olanları seçer: "
-                                      "yarısı en yüksek hacimli, yarısı son 24 saatte en çok hareket eden coinler. "
-                                      "Stablecoin ve kaldıraçlı tokenlar elenir. Yukarıdaki semboller her zaman "
-                                      "listede kalır; açık pozisyonu olan coin listeden çıkarılmaz.")
+        self.auto_universe = QComboBox()
+        self.auto_universe.addItem("Bütün coinler (Binance'teki tüm likit USDT çiftleri)", "all")
+        self.auto_universe.addItem("En hacimli + en çok hareket eden coinler", "top")
+        self.auto_universe.addItem("Yalnızca yukarıdaki semboller", "manual")
+        idx = self.auto_universe.findData(s.universe_mode)
+        self.auto_universe.setCurrentIndex(idx if idx >= 0 else 0)
+        self.auto_universe.setToolTip("Bütün coinler: günlük hacmi 2M USDT üstündeki tüm USDT çiftleri sırayla "
+                                      "taranır (her turda 25 coin; açık pozisyonlar her turda). Stablecoin ve "
+                                      "kaldıraçlı tokenlar elenir; liste saatte bir yenilenir. Yukarıdaki semboller "
+                                      "her zaman listede kalır.")
         self.universe_size = QSpinBox()
         self.universe_size.setRange(2, 40)
         self.universe_size.setValue(s.universe_size)
         self.universe_size.setSuffix(" coin")
-        mf.addRow("", self.auto_universe)
-        mf.addRow("Takip edilecek coin sayısı", self.universe_size)
+        mf.addRow("Taranacak coinler", self.auto_universe)
+        mf.addRow("Coin sayısı (hacimli mod)", self.universe_size)
         mf.addRow("Mum aralığı", self.interval)
         mf.addRow("Kontrol sıklığı", self.poll)
 
@@ -717,7 +721,7 @@ class BotTab(QWidget):
         s.engine_type = self.engine_type.currentData()
         s.intel_market = self.intel_market.currentData()
         s.intel_leverage = self.leverage.value()
-        s.auto_universe = self.auto_universe.isChecked()
+        s.universe_mode = self.auto_universe.currentData()
         s.universe_size = self.universe_size.value()
         self.ctx.persist()
         return s
@@ -924,10 +928,12 @@ class BotTab(QWidget):
                     insight_engine = InsightEngine(cfg.catalyst, market_client, quote=cfg.quote_asset)
                     insight_store = InsightStore()
                 universe = None
-                if s.auto_universe:
+                if s.universe_mode in ("top", "all"):
                     from ..intel.universe import UniverseSelector
+                    all_mode = s.universe_mode == "all"
                     universe = UniverseSelector(market_client, cfg.quote_asset, s.universe_size,
-                                                base_symbols=s.symbols)
+                                                min_quote_volume=2_000_000 if all_mode else 20_000_000,
+                                                base_symbols=s.symbols, all_coins=all_mode)
                 engine = IntelligentBotEngine(cfg, s.symbols, market_client, venue, store, futures_client=fut,
                                               decision_engine=de, poll_seconds=s.poll_seconds,
                                               state_path=self._state_path(live), on_event=on_event,

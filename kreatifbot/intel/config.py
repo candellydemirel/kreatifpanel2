@@ -123,6 +123,9 @@ class RiskConfig:
     liquidation_buffer_atr: float = 1.0
     default_maintenance_margin_rate: float = 0.005  # Binance bracket alınamazsa (tahmin olarak işaretlenir)
     require_probability_for_live: bool = True
+    # Küçük hesap (ör. 20 USDT): risk tabanlı boyut Binance'in en küçük emir tutarının altında kalırsa
+    # pozisyon en küçük tutara yükseltilir; ancak bu işlemdeki risk sermayenin bu yüzdesini aşamaz.
+    small_account_max_risk_pct: float = 1.5
 
 
 @dataclass
@@ -279,6 +282,7 @@ class AutopilotConfig:
     holdout_frac: float = 0.2            # Meta model doğrulaması için ayrılan son veri oranı
     min_auc: float = 0.55                # Örneklem dışı AUC bu değerin altındaysa model devreye alınmaz
     min_holdout_samples: int = 30
+    max_symbols: int = 10                # Bakım (geçmiş test + öğrenme) en hacimli bu kadar coinde yapılır
 
 
 @dataclass

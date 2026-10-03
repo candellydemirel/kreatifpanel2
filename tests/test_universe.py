@@ -96,3 +96,43 @@ def test_engine_logs_plain_summary(tmp_path):
     assert "ilk tarama" in text and "Avantaj maliyetin altında" in text and "SOLUSDT LONG (alış) 63/100" in text
     # eski varsayılan zaman dilimleri yeni varsayılana taşınır
     assert config_from_dict({"timeframes": OLD_DEFAULT_TIMEFRAMES}).timeframes.entry == "15m"
+
+
+def test_all_coins_mode_and_batch_rotation(tmp_path):
+    from kreatifbot.intel.execution import PaperVenue
+    from kreatifbot.intel.live_engine import IntelligentBotEngine
+
+    from .conftest import make_ohlcv
+    from .test_intel import FakeMarket, cfg_1h
+
+    syms, _ = select_universe(TICKERS, "USDT", 2, 20_000_000, None, ["BTCUSDT"], all_coins=True)
+    assert len(syms) > 2 and syms[0] == "BTCUSDT" and "TINYUSDT" not in syms and "USDCUSDT" not in syms
+    cfg = cfg_1h()
+    eng = IntelligentBotEngine(cfg, ["BTCUSDT"], FakeMarket(make_ohlcv(300)), PaperVenue("SPOT", 20, cfg), None,
+                               state_path=tmp_path / "s.json")
+    eng.symbols = [f"C{i}USDT" for i in range(10)]
+    eng.batch_size = 4
+    eng.positions["C9USDT"] = object()
+    seen = set()
+    for _ in range(3):
+        b = eng._batch()
+        assert b[0] == "C9USDT" and len(b) == 4      # açık pozisyon her turda incelenir
+        seen |= set(b)
+    assert seen == set(eng.symbols)                  # 3 turda bütün coinler
+
+
+def test_small_account_bumps_to_min_notional():
+    from kreatifbot.intel.config import RiskConfig
+    from kreatifbot.intel.risk_engine import position_size
+
+    cfg = RiskConfig()
+    # 20 USDT, risk %0.5 = 0.10 USDT, stop %2 → 5 USDT pozisyon < en küçük emir 5 → 5.5'e yükselir
+    sz = position_size(20, 100.0, 98.0, cfg, 90, available_balance=20, min_notional=5.0)
+    assert sz.ok and abs(sz.notional - 5.5) < 1e-9 and sz.risk_pct <= cfg.small_account_max_risk_pct
+    assert any("Küçük hesap" in w for w in sz.warnings)
+    # stop çok uzaksa (%10) en küçük emirde risk %2.75 > sınır → işlem yok
+    far = position_size(20, 100.0, 90.0, cfg, 90, available_balance=20, min_notional=5.0)
+    assert not far.ok and "küçük hesap sınırı" in far.reasons[0]
+    # bakiye yetmiyorsa → işlem yok
+    poor = position_size(20, 100.0, 98.0, cfg, 90, available_balance=3, min_notional=5.0)
+    assert not poor.ok
