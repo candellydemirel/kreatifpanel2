@@ -45,7 +45,7 @@ class IntelligentBotEngine(EngineCore):
     def __init__(self, cfg: IntelConfig, symbols: list[str], market_client, venue, store: SignalStore | None,
                  futures_client=None, decision_engine: DecisionEngine | None = None, poll_seconds: float = 20,
                  state_path: str | Path | None = None, on_event=None, kline_limit: int = 600,
-                 btc_client=None, news_monitor=None, insight_engine=None, insight_store=None):
+                 btc_client=None, news_monitor=None, insight_engine=None, insight_store=None, universe=None):
         self.cfg = cfg
         self.symbols = [s.strip().upper() for s in symbols if s.strip()]
         if not self.symbols:
@@ -56,6 +56,7 @@ class IntelligentBotEngine(EngineCore):
         not_allowed = [s for s in self.symbols if cfg.allowed_symbols and s not in cfg.allowed_symbols]
         if not_allowed:
             raise ValueError(f"İzin verilen sembol listesinde değil (Zeka Motoru ayarları): {', '.join(not_allowed)}")
+        self.universe = universe              # otomatik coin seçimi (None → yalnızca elle girilen semboller)
         if cfg.timeframes.entry not in cfg.allowed_timeframes:
             raise ValueError(f"Giriş zaman dilimi izinli değil: {cfg.timeframes.entry}")
         self.market = cfg.market
@@ -113,12 +114,49 @@ class IntelligentBotEngine(EngineCore):
 
     # ------------------------------------------------------------------ otomatik pilot bakımı
     def start(self):
+        self._live_readiness()
         super().start()
         if self.cfg.autopilot.enabled and (self._maint_thread is None or not self._maint_thread.is_alive()):
             import threading
             self._maint_thread = threading.Thread(target=self._maintenance_loop, name="IntelMaintenance",
                                                   daemon=True)
             self._maint_thread.start()
+
+    def _live_readiness(self):
+        """Canlı modda botun neden işlem açamayacağını baştan açıkça söyler."""
+        if not getattr(self.venue, "is_live", False):
+            return
+        live = [s.key for s in self.engine.strategies
+                if self.engine.stage_of(s.key).value in ("LIMITED_LIVE", "FULL_LIVE")]
+        if not live:
+            self.log("UYARI: Canlı moddasınız ama hiçbir strateji 'Sınırlı canlı' / 'Tam canlı' aşamasında değil → "
+                     "bot gerçek emir AÇMAZ, yalnızca analiz eder. Önce 'Kağıt işlem' modunda deneyin ya da "
+                     "Zeka Motoru → Stratejiler'den aşamayı yükseltin.", logging.WARNING)
+        try:
+            free = float(self.venue.available_balance())
+        except Exception as exc:  # noqa: BLE001
+            self.log(f"Bakiye okunamadı: {exc}", logging.WARNING)
+            return
+        if free < 10:
+            where = "Spot" if self.market == "SPOT" else "USDⓈ-M Vadeli"
+            self.log(f"UYARI: Binance {where} cüzdanınızda serbest {self.quote_asset} {free:.2f} → bot alım "
+                     f"yapamaz (Binance'in en küçük emir tutarı ~5-10 {self.quote_asset}). Binance'te "
+                     f"{self.quote_asset}'yi Fonlama cüzdanından {where} cüzdanına aktarın.", logging.WARNING)
+
+    def _universe_tick(self):
+        if self.universe is None or not self.universe.due():
+            return
+        new = self.universe.refresh(keep=list(self.positions))
+        if not new:
+            self.log(f"Otomatik coin seçimi: {self.universe.status}", logging.WARNING)
+            return
+        added = [s for s in new if s not in self.symbols]
+        removed = [s for s in self.symbols if s not in new]
+        self.symbols = new
+        if added or removed:
+            self.log(f"Otomatik coin seçimi ({len(new)} coin): " + ", ".join(
+                f"{s} ({self.universe.reasons.get(s, '')})" for s in new))
+            self._emit("universe", {"symbols": list(new), "reasons": dict(self.universe.reasons)})
 
     def _maintenance_loop(self):
         ap = self.cfg.autopilot
@@ -219,6 +257,10 @@ class IntelligentBotEngine(EngineCore):
                 self._news_tick()
             except Exception as exc:  # noqa: BLE001 - haber hatası ticareti durdurmamalı
                 self.log(f"Haber kontrolü hatası: {exc}", logging.WARNING)
+            try:
+                self._universe_tick()
+            except Exception as exc:  # noqa: BLE001 - seçim hatası mevcut listeyle devam etsin
+                self.log(f"Otomatik coin seçimi hatası: {exc}", logging.WARNING)
             try:
                 self._listing_tick()
             except BinanceAPIError as exc:
@@ -513,7 +555,8 @@ class IntelligentBotEngine(EngineCore):
                          f"{ins.catalyst.score:.0f})")
             if ins.signal != "AL" or not cc.trade_enabled or ins.symbol in self.positions:
                 continue
-            if not cc.any_binance_pair and self.cfg.allowed_symbols and ins.symbol not in self.cfg.allowed_symbols:
+            if (not cc.any_binance_pair and self.cfg.allowed_symbols and ins.symbol not in self.cfg.allowed_symbols
+                    and ins.symbol not in self.symbols):
                 self.log(f"{ins.symbol}: AL öngörüsü var ama izinli sembol listesinde değil (işlem yok)")
                 continue
             self._open_external(ins.symbol, ins.entry, ins.stop, ins.targets, cc.tp_fractions, "news_catalyst",

@@ -519,6 +519,18 @@ class BotTab(QWidget):
         self.poll.setValue(s.poll_seconds)
         self.poll.setSuffix(" sn")
         mf.addRow("Semboller", self.symbols)
+        self.auto_universe = QCheckBox("Coinleri bot seçsin (hacimli + en çok hareket eden USDT çiftleri, saatlik)")
+        self.auto_universe.setChecked(s.auto_universe)
+        self.auto_universe.setToolTip("Zeka Motoru, Binance'teki USDT çiftlerinden yeterli hacmi olanları seçer: "
+                                      "yarısı en yüksek hacimli, yarısı son 24 saatte en çok hareket eden coinler. "
+                                      "Stablecoin ve kaldıraçlı tokenlar elenir. Yukarıdaki semboller her zaman "
+                                      "listede kalır; açık pozisyonu olan coin listeden çıkarılmaz.")
+        self.universe_size = QSpinBox()
+        self.universe_size.setRange(2, 40)
+        self.universe_size.setValue(s.universe_size)
+        self.universe_size.setSuffix(" coin")
+        mf.addRow("", self.auto_universe)
+        mf.addRow("Takip edilecek coin sayısı", self.universe_size)
         mf.addRow("Mum aralığı", self.interval)
         mf.addRow("Kontrol sıklığı", self.poll)
 
@@ -659,6 +671,8 @@ class BotTab(QWidget):
         self.intel_market.setEnabled(intel)
         self.leverage.setEnabled(intel and self.intel_market.currentData() == "USDM_FUTURES")
         self.intel_note.setVisible(intel)
+        self.auto_universe.setEnabled(intel)
+        self.universe_size.setEnabled(intel)
     def refresh_network_label(self):
         s = self.ctx.settings
         if s.testnet:
@@ -703,6 +717,8 @@ class BotTab(QWidget):
         s.engine_type = self.engine_type.currentData()
         s.intel_market = self.intel_market.currentData()
         s.intel_leverage = self.leverage.value()
+        s.auto_universe = self.auto_universe.isChecked()
+        s.universe_size = self.universe_size.value()
         self.ctx.persist()
         return s
 
@@ -710,7 +726,8 @@ class BotTab(QWidget):
         self.start_btn.setEnabled(not running)
         self.stop_btn.setEnabled(running)
         for w in (self.paper, self.live, self.paper_balance, self.reset_paper, self.symbols, self.interval,
-                  self.poll, self.strategy, self.risk, self.engine_type, self.intel_market, self.leverage):
+                  self.poll, self.strategy, self.risk, self.engine_type, self.intel_market, self.leverage,
+                  self.auto_universe, self.universe_size):
             w.setEnabled(not running)
         if not running:
             self._engine_changed()
@@ -906,11 +923,16 @@ class BotTab(QWidget):
                     from ..intel.catalyst import InsightEngine, InsightStore
                     insight_engine = InsightEngine(cfg.catalyst, market_client, quote=cfg.quote_asset)
                     insight_store = InsightStore()
+                universe = None
+                if s.auto_universe:
+                    from ..intel.universe import UniverseSelector
+                    universe = UniverseSelector(market_client, cfg.quote_asset, s.universe_size,
+                                                base_symbols=s.symbols)
                 engine = IntelligentBotEngine(cfg, s.symbols, market_client, venue, store, futures_client=fut,
                                               decision_engine=de, poll_seconds=s.poll_seconds,
                                               state_path=self._state_path(live), on_event=on_event,
                                               news_monitor=news, insight_engine=insight_engine,
-                                              insight_store=insight_store)
+                                              insight_store=insight_store, universe=universe)
             except ValueError as exc:
                 self.start_btn.setEnabled(True)
                 self.ctx.show_error("Zeka Motoru başlatılamadı", str(exc))

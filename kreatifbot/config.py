@@ -110,6 +110,8 @@ class Settings:
     autopilot: bool = False              # Tek tuşla tam otomatik çalışma (her açılışta devam eder)
     intel_market: str = "SPOT"           # SPOT | USDM_FUTURES
     intel_leverage: int = 1
+    auto_universe: bool = True           # Zeka Motoru coinleri kendisi seçer (hacimli + hareketli USDT çiftleri)
+    universe_size: int = 15
     minimize_to_tray: bool = True        # Pencere kapatılınca tepside çalışmaya devam et
     prevent_sleep: bool = True           # Bot çalışırken Windows uykuya geçmesin
     autostart: bool = False              # Windows açılınca uygulamayı başlat
