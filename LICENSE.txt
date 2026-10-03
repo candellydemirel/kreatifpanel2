@@ -1,3 +1,0 @@
-MIT License
-
-KreatifPanel Prototype - generated for user. Use at your own risk. Not production-ready.
