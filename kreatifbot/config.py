@@ -116,6 +116,7 @@ class Settings:
     start_bot_on_launch: bool = False    # Uygulama açılınca botu otomatik başlat
     unattended_live_confirmed: bool = False  # Canlı modda onaysız otomatik başlatmaya izin (bilinçli onay)
     cryptopanic_token: str = ""
+    translate_email: str = ""            # İsteğe bağlı; yalnızca kullanıcı girerse MyMemory'ye gönderilir
     telegram_enabled: bool = False
     telegram_token: str = ""
     telegram_chat_id: str = ""

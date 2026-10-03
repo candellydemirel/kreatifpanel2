@@ -24,6 +24,7 @@ import pandas as pd
 
 from ..binance_client import BinanceAPIError
 from ..engine import EngineCore
+from ..i18n import LISTING_KIND_TR, tr, tr_reason
 from ..models import ClosedTrade
 from ..utils import INTERVALS
 from .config import IntelConfig
@@ -362,7 +363,7 @@ class IntelligentBotEngine(EngineCore):
         }
         self._emit("signal", {"symbol": symbol, **self.last_signals[symbol]})
         if d.is_trade:
-            self.log(f"{symbol}: {d.direction} sinyali (güven {d.confidence:.0f}, {d.strategy}, R:R {d.risk_reward})")
+            self.log(f"{symbol}: {tr(d.direction)} sinyali (güven {d.confidence:.0f}, {d.strategy}, R:R {d.risk_reward})")
             self.pending[symbol] = d
             self._try_pending(symbol, price, book)
 
@@ -414,7 +415,7 @@ class IntelligentBotEngine(EngineCore):
                 self._emit("news", it)
         for ev in events:
             self._emit("listing", ev)
-            self.log(f"Listeleme olayı: {ev.symbol} {ev.kind} ({ev.source})")
+            self.log(f"Listeleme olayı: {ev.symbol} {LISTING_KIND_TR.get(ev.kind, ev.kind)} ({ev.source})")
             if ev.kind in ("NEW_SYMBOL", "NOW_TRADING") and ev.status == "TRADING":
                 self.listing_watch.setdefault(ev.symbol, time.time())
         if self.cfg.news.delist_exit:
@@ -520,7 +521,7 @@ class IntelligentBotEngine(EngineCore):
         live = bool(self.venue.is_live)
         from .types import LIVE_STAGES, LifecycleStage
         if live and LifecycleStage(stage) not in LIVE_STAGES:
-            self.log(f"{symbol}: {strategy} sinyali var ama aşama {stage} (canlı işlem izni yok)")
+            self.log(f"{symbol}: {strategy} sinyali var ama aşama {tr(stage)} (canlı işlem izni yok)")
             return False
         if sum(1 for p in self.positions.values() if p.strategy == strategy) >= max_concurrent:
             return False
@@ -618,7 +619,7 @@ class IntelligentBotEngine(EngineCore):
         now = datetime.now(timezone.utc)
         if d.signal_expiry and now > pd.Timestamp(d.signal_expiry).to_pydatetime():
             self.pending.pop(symbol, None)
-            self.log(f"{symbol}: sinyal süresi doldu (SIGNAL_EXPIRED)")
+            self.log(f"{symbol}: sinyal süresi doldu")
             self._status(d, SignalStatus.EXPIRED)
             return
         s = 1 if d.direction == "LONG" else -1
@@ -648,7 +649,7 @@ class IntelligentBotEngine(EngineCore):
         except (ExecutionError, BinanceAPIError) as exc:
             self.pending.pop(symbol, None)
             self._status(d, SignalStatus.CANCELLED)
-            self.log(f"{symbol}: EXECUTION_FAILURE — {exc}", logging.ERROR)
+            self.log(f"{symbol}: emir hatası — {exc}", logging.ERROR)
             return
         self.pending.pop(symbol, None)
         pos = open_position(symbol, self.market, d.direction, fill.price, fill.qty, d.stop_loss, d.take_profit_levels,
@@ -682,14 +683,14 @@ class IntelligentBotEngine(EngineCore):
                 # Emir gerçekleşmedi: miktarı geri ekle. Tam çıkışlar (SL/süre vb.) sonraki döngüde yeniden tetiklenir;
                 # kısmi TP reddedilirse (ör. minimum tutar altı) pozisyon sonraki hedef/stop ile yönetilmeye devam eder.
                 pos.qty += a.qty
-                self.log(f"{symbol}: çıkış emri başarısız ({a.reason}) — {exc}. Pozisyon korunuyor, tekrar denenecek.",
+                self.log(f"{symbol}: çıkış emri başarısız ({tr_reason(a.reason)}) — {exc}. Pozisyon korunuyor, tekrar denenecek.",
                          logging.ERROR)
                 return
             gross = (fill.price - pos.entry_price) * pos.sign * fill.qty
             pos.realized_pnl += gross
             pos.fees_paid += fill.fee
             pos.confidence_history.append(f"{a.reason}:{a.note}")
-            self.log(f"{symbol}: {a.reason} {a.note} — {fill.qty:.8g} @ {fill.price:.8g} (brüt {gross:+.2f})")
+            self.log(f"{symbol}: {tr_reason(a.reason)} {a.note} — {fill.qty:.8g} @ {fill.price:.8g} (brüt {gross:+.2f})")
             if a.full or pos.qty <= 1e-12:
                 self._finalize(symbol, pos, a.reason)
                 return
@@ -725,7 +726,7 @@ class IntelligentBotEngine(EngineCore):
                                           pos.realized_pnl, pos.fees_paid, trade.r_multiple, hold_min)
             except DatabaseError as exc:
                 self.log(str(exc), logging.ERROR)
-        self.log(f"KAPANDI {symbol} ({reason}): net {net:+.2f} {self.quote_asset}, R {trade.r_multiple:+.2f}")
+        self.log(f"KAPANDI {symbol} ({tr_reason(reason)}): net {net:+.2f} {self.quote_asset}, R {trade.r_multiple:+.2f}")
         self._save_state()
         self._emit("positions", None)
         self._emit("trade", trade)

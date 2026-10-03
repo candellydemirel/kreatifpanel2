@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 import numpy as np
 import pandas as pd
 
+from ..i18n import tr
 from ..utils import INTERVALS
 from . import ENGINE_VERSION
 from .config import IntelConfig
@@ -220,7 +221,7 @@ class DecisionEngine:
             d.reasons.append(msg)
             d.signal_status = status.value
             d.direction = Direction.NONE.value
-            log.append(f"Karar: NO TRADE ({reason.value}) — {msg}")
+            log.append(f"Karar: İŞLEM YOK ({tr(reason.value)}) — {msg}")
             d.explanation = self.explain(d)
             return d
 
@@ -246,7 +247,7 @@ class DecisionEngine:
         regime = rr.regime
         d.market_regime = regime.value
         d.reasons += [f"Rejim {regime.value}: " + "; ".join(rr.reasons)]
-        log.append(f"Rejim: {regime.value} (ADX {rr.adx:.1f}, vol%ile {rr.vol_percentile:.2f})")
+        log.append(f"Rejim: {tr(regime.value)} (ADX {rr.adx:.1f}, vol%ile {rr.vol_percentile:.2f})")
 
         # 3) Yönlendirici
         rt = route(regime, self.strategies, cfg, prep.market, self.health, live=live)
@@ -302,7 +303,7 @@ class DecisionEngine:
         for g in GROUPS:
             pts, w = d.scores[g]
             if w > 0:
-                log.append(f"  {g:11s}: {('UNAVAILABLE' if pts is None else f'{pts:.1f}/{w:.0f}')}")
+                log.append(f"  {tr(g):13s}: {('Veri yok' if pts is None else f'{pts:.1f}/{w:.0f}')}")
         log.append(f"  Toplam: {confidence:.1f}/100 (LONG {long_s:.1f} / SHORT {short_s:.1f}, kapsam {coverage:.0%})")
 
         # MTF
@@ -464,12 +465,12 @@ class DecisionEngine:
             if math.isfinite(lp) and ((lp >= stop - buf) if sign > 0 else (lp <= stop + buf)):
                 return no_trade(NoTradeReason.LIQUIDATION_RISK,
                                 f"Tasfiye fiyatı {_fmt(lp)} stop'a ({_fmt(stop)}) çok yakın/önde; kaldıracı düşürün")
-        log.append(f"Risk kontrolü: PASS (risk %{d.risk_percent:.3f}, boyut {qty:.6g}, nominal {d.notional:.2f})")
+        log.append(f"Risk kontrolü: GEÇTİ (risk %{d.risk_percent:.3f}, boyut {qty:.6g}, nominal {d.notional:.2f})")
 
         d.signal_status = SignalStatus.CONFIRMED.value
         d.reasons.append(f"{primary.name}: {primary.spec.entry}")
         self._add_factor_reasons(d, row, direction)
-        log.append(f"Karar: {direction}")
+        log.append(f"Karar: {tr(direction)}")
         d.explanation = self.explain(d)
         return d
 
@@ -480,36 +481,38 @@ class DecisionEngine:
             d.reasons.append(f"VWAP: fiyat VWAP'ın {'üstünde' if row['close'] > row['vwap'] else 'altında'}")
         if pd.notna(row.get("cvd_slope")):
             d.reasons.append(f"CVD: {'pozitif' if row['cvd_slope'] > 0 else 'negatif'} eğim — "
-                             f"{cvd_divergence(row.get('roc', np.nan), row['cvd_slope'])}")
+                             f"{tr(cvd_divergence(row.get('roc', np.nan), row['cvd_slope']))}")
         if pd.notna(row.get("oi_change_pct")):
             q = oi_quadrant(row.get("roc", np.nan), row["oi_change_pct"])
-            d.reasons.append(f"OI: %{row['oi_change_pct']:+.2f} → {q} ({OI_QUADRANT_NOTES.get(q, '')})")
+            d.reasons.append(f"OI: %{row['oi_change_pct']:+.2f} → {tr(q)} ({OI_QUADRANT_NOTES.get(q, '')})")
         fc = classify_funding(row.get("funding_rate") if pd.notna(row.get("funding_rate")) else None, self.cfg.funding)
-        d.reasons.append(f"Funding: {fc}")
+        d.reasons.append(f"Fonlama oranı: {tr(fc)}")
         if row.get("pattern_bull_count", 0) and s > 0:
             d.reasons.append("Mum formasyonu: yükseliş formasyonu (yalnızca uyum faktörü)")
         if row.get("pattern_bear_count", 0) and s < 0:
             d.reasons.append("Mum formasyonu: düşüş formasyonu (yalnızca uyum faktörü)")
 
     def explain(self, d: DecisionObject) -> str:
-        lines = [f"{d.symbol} ({d.market}, {d.timeframe})", f"Karar: {d.direction if d.is_trade else 'NO TRADE'}"
-                 f"  [{d.signal_status}]"]
+        lines = [f"{d.symbol} ({tr(d.market)}, {d.timeframe})",
+                 f"Karar: {tr(d.direction) if d.is_trade else 'İŞLEM YOK'}  [{tr(d.signal_status)}]"]
+        if d.no_trade_reasons:
+            lines.append("Neden: " + ", ".join(tr(r) for r in d.no_trade_reasons))
         if d.strategy:
             lines.append(f"Birincil strateji: {self.by_key[d.strategy].name if d.strategy in self.by_key else d.strategy}"
                          f"  | Uyumlu: {', '.join(d.strategies_agreeing)}")
         if d.confidence:
             lines.append(f"Güven: {d.confidence:.0f}/100 ({d.confidence_band})  LONG {d.long_score:.0f} / "
                          f"SHORT {d.short_score:.0f}  kapsam %{(d.coverage or 0) * 100:.0f}")
-        lines.append(f"Piyasa rejimi: {d.market_regime}")
+        lines.append(f"Piyasa rejimi: {tr(d.market_regime)}")
         if d.scores:
             lines.append("")
             lines.append("Grup puanları:")
             for g, (pts, w) in d.scores.items():
                 if w > 0:
-                    lines.append(f"  {g:11s} {'UNAVAILABLE' if pts is None else f'{pts:5.1f} / {w:.0f}'}")
+                    lines.append(f"  {tr(g):13s} {'Veri yok' if pts is None else f'{pts:5.1f} / {w:.0f}'}")
         if d.mtf:
             lines.append("")
-            lines.append("Zaman dilimleri: " + ", ".join(f"{k}: {v}" for k, v in d.mtf.items() if k != "score"))
+            lines.append("Zaman dilimleri: " + ", ".join(f"{k}: {tr(v)}" for k, v in d.mtf.items() if k != "score"))
         if math.isfinite(d.ai_probability):
             lines.append(f"AI: başarı olasılığı %{d.ai_probability * 100:.0f} (model {d.model_version})")
         if d.is_trade:

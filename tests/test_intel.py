@@ -560,7 +560,7 @@ def test_decision_object_and_no_trade(prepared):
     assert d.direction == "LONG"  # spot
     assert d.risk_reward >= eng.cfg.risk.min_rr
     assert d.score_of("trend") is not None and "Grup puanları" in d.explanation
-    assert any("Toplam" in line for line in d.log_lines) and d.log_lines[-1] == "Karar: LONG"
+    assert any("Toplam" in line for line in d.log_lines) and d.log_lines[-1] == "Karar: LONG (alış)"
     reasons = {r for o in outs for r in o.no_trade_reasons}
     assert reasons & {"LOW_CONFIDENCE", "CONFLICT", "NO_CANDIDATE"}
     assert all(o.direction == "NONE" for o in outs if not o.is_trade)

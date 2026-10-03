@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 
 from .. import __version__
 from ..binance_client import BinanceClient
+from ..i18n import tr
 from ..config import GUIDE_PDF, Settings, data_dir, load_settings, resource_path, save_settings
 from ..system import prevent_sleep
 from .api_dialog import ApiKeyDialog
@@ -54,6 +55,15 @@ def apply_dark_theme(app: QApplication):
         QTabBar::tab { padding: 8px 16px; }
         QTabBar::tab:selected { color: #58a6ff; }
         QHeaderView::section { background: #21262d; padding: 4px; border: none; }
+        QRadioButton::indicator { width: 14px; height: 14px; border-radius: 9px; border: 2px solid #8b949e;
+                                  background: #0d1117; }
+        QRadioButton::indicator:checked { border-color: #58a6ff; background: qradialgradient(cx:0.5, cy:0.5,
+            radius:0.5, fx:0.5, fy:0.5, stop:0 #58a6ff, stop:0.55 #58a6ff, stop:0.6 #0d1117, stop:1 #0d1117); }
+        QRadioButton:checked { color: #58a6ff; font-weight: bold; }
+        QCheckBox::indicator { width: 14px; height: 14px; border-radius: 3px; border: 2px solid #8b949e;
+                               background: #0d1117; }
+        QCheckBox::indicator:checked { border-color: #58a6ff; background: #58a6ff; }
+        QCheckBox:checked { color: #c9d1d9; font-weight: bold; }
     """)
 
 
@@ -238,7 +248,7 @@ class MainWindow(QMainWindow):
         elif kind in ("news", "listing"):
             self.news_tab._load_cached()
             if kind == "listing":
-                self.status(f"Yeni listeleme olayı: {payload.symbol} ({payload.kind})")
+                self.status(f"Yeni listeleme olayı: {payload.symbol} ({tr(payload.kind)})")
 
     def telegram_ready(self) -> bool:
         s = self.settings

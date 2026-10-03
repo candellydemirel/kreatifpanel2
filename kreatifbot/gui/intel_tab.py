@@ -15,10 +15,10 @@ from PySide6.QtWidgets import (
     QSplitter, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
+from ..i18n import tr, tr_reason
 from ..intel.config import IntelConfig, config_from_dict, load_intel_config, save_intel_config
 from ..intel.strategies import REGISTRY
-from ..intel.types import LifecycleStage
-from .widgets import GREEN, RED, combo_symbol, fill_table, make_table, signal_color
+from .widgets import GREEN, RED, combo_symbol, fill_table, make_table, signal_color, stage_combo
 
 if TYPE_CHECKING:
     from .main_window import MainWindow
@@ -275,17 +275,15 @@ class IntelTab(QWidget):
             self.st_table.setItem(r, 1, QTableWidgetItem(f"{cls.spec.name} ({key})"))
             self.st_table.setItem(r, 2, QTableWidgetItem(cls.spec.family))
             self.st_table.setItem(r, 3, QTableWidgetItem(cls.spec.style))
-            stage = QComboBox()
-            stage.addItems([s.value for s in LifecycleStage])
-            stage.setCurrentText(sc.stage)
+            stage = stage_combo(sc.stage)
             self.st_table.setCellWidget(r, 4, stage)
             rm = QDoubleSpinBox()
             rm.setRange(0.1, 1.0)
             rm.setSingleStep(0.1)
             rm.setValue(min(1.0, sc.risk_multiplier))
             self.st_table.setCellWidget(r, 5, rm)
-            self.st_table.setItem(r, 6, QTableWidgetItem(str(health.get(key, "ACTIVE"))))
-            self.st_table.setItem(r, 7, QTableWidgetItem(", ".join(sorted(x.value for x in cls.spec.preferred))))
+            self.st_table.setItem(r, 6, QTableWidgetItem(tr(str(health.get(key, "ACTIVE")))))
+            self.st_table.setItem(r, 7, QTableWidgetItem(", ".join(sorted(tr(x.value) for x in cls.spec.preferred))))
             self.st_table.item(r, 1).setData(Qt.ItemDataRole.UserRole, key)
         self.st_table.resizeColumnsToContents()
 
@@ -294,7 +292,7 @@ class IntelTab(QWidget):
             key = self.st_table.item(r, 1).data(Qt.ItemDataRole.UserRole)
             sc = self.cfg.strategy(key)
             sc.enabled = self.st_table.cellWidget(r, 0).isChecked()
-            sc.stage = self.st_table.cellWidget(r, 4).currentText()
+            sc.stage = self.st_table.cellWidget(r, 4).currentData()
             sc.risk_multiplier = self.st_table.cellWidget(r, 5).value()
         try:
             save_intel_config(self.cfg)
@@ -384,8 +382,8 @@ class IntelTab(QWidget):
             rows = []
             for g, w in self.cfg.scoring.weights.items():
                 lv, sv = gs.get(f"{g}_long"), gs.get(f"{g}_short")
-                rows.append([g, "UNAVAILABLE" if pd.isna(lv) else f"{lv * w:.1f}",
-                             "UNAVAILABLE" if pd.isna(sv) else f"{sv * w:.1f}", f"{w:.0f}"])
+                rows.append([tr(g), "Veri yok" if pd.isna(lv) else f"{lv * w:.1f}",
+                             "Veri yok" if pd.isna(sv) else f"{sv * w:.1f}", f"{w:.0f}"])
             rows.append(["TOPLAM", fmt_cell(d.long_score), fmt_cell(d.short_score), "100"])
             fill_table(self.scores, rows)
             tf = self.cfg.timeframes
@@ -397,8 +395,8 @@ class IntelTab(QWidget):
             st_rows = [[f"{n} ({k})", fam, stt] for k, (n, fam, stt) in res["route"].items()]
             fill_table(self.strats, st_rows, [GREEN if r[2].startswith("ADAY") else None for r in st_rows])
             self.log.setPlainText("\n".join(d.log_lines))
-            label = d.direction if d.is_trade else "NO TRADE"
-            self.ctx.status(f"{symbol}: {label} (güven {d.confidence:.0f}, rejim {d.market_regime})")
+            label = tr(d.direction) if d.is_trade else "İşlem yok"
+            self.ctx.status(f"{symbol}: {label} (güven {d.confidence:.0f}, rejim {tr(d.market_regime)})")
 
         def failed(msg):
             self.run_btn.setEnabled(True)
@@ -421,9 +419,9 @@ class IntelTab(QWidget):
         self._live = self._live[:300]
         rows, colors = [], []
         for x in self._live:
-            label = x.direction if x.is_trade else "NO TRADE"
-            rows.append([x.created_at[:19].replace("T", " "), x.symbol, label, f"{x.confidence:.0f}", x.market_regime,
-                         x.strategy, ", ".join(x.no_trade_reasons)])
+            label = tr(x.direction) if x.is_trade else "İşlem yok"
+            rows.append([x.created_at[:19].replace("T", " "), x.symbol, label, f"{x.confidence:.0f}",
+                         tr(x.market_regime), x.strategy, ", ".join(tr(r) for r in x.no_trade_reasons)])
             colors.append(signal_color("AL" if x.direction == "LONG" and x.is_trade else
                                        "SAT" if x.direction == "SHORT" and x.is_trade else ""))
         fill_table(self.live_table, rows, colors)
@@ -445,10 +443,10 @@ class IntelTab(QWidget):
         self._db = df
         rows, colors = [], []
         for _, r in df.iterrows():
-            rows.append([str(r["created_at"])[:19], r["symbol"], r["market_type"], r["direction"], r["status"],
-                         r["strategy"], fmt_cell(r["confidence"]), r["market_regime"], fmt_cell(r["entry"]),
+            rows.append([str(r["created_at"])[:19], r["symbol"], tr(r["market_type"]), tr(r["direction"]), tr(r["status"]),
+                         r["strategy"], fmt_cell(r["confidence"]), tr(r["market_regime"]), fmt_cell(r["entry"]),
                          fmt_cell(r["sl"]), fmt_cell(r["tp1"]), fmt_cell(r["risk_reward"]), r["outcome"] or "",
-                         r["exit_reason"] or "", fmt_cell(r["pnl"]), fmt_cell(r["r_multiple"]),
+                         tr_reason(r["exit_reason"] or ""), fmt_cell(r["pnl"]), fmt_cell(r["r_multiple"]),
                          fmt_cell(r["holding_time_min"]), r["signal_id"]])
             colors.append(GREEN if (r["pnl"] or 0) > 0 else RED if (r["pnl"] or 0) < 0 else None)
         fill_table(self.db_table, rows, colors)

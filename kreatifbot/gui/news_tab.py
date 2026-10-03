@@ -11,9 +11,10 @@ from PySide6.QtWidgets import (
     QSpinBox, QSplitter, QTabWidget, QVBoxLayout, QWidget,
 )
 
+from ..i18n import tr
 from ..intel.config import load_intel_config, save_intel_config
 from .intel_tab import df_to_table, fmt_cell, mono
-from .widgets import GREEN, RED, fill_table, make_table
+from .widgets import GREEN, RED, fill_table, make_table, stage_combo
 
 if TYPE_CHECKING:
     from .main_window import MainWindow
@@ -24,13 +25,17 @@ CATEGORY_COLORS = {"DELISTING": RED, "HACK": RED, "REGULATION_NEG": RED, "LISTIN
 
 def build_monitor(settings, cfg):
     """Ayarlara göre NewsMonitor oluşturur (Bot ve Haberler sekmesi ortak kullanır)."""
-    from ..intel.news import RSS_FEEDS, NewsMonitor
+    from ..intel.news import RSS_FEEDS, RSS_FEEDS_TR, NewsMonitor
+    from ..intel.translate import Translator
     nc = cfg.news
     feeds = {k: v for k, v in RSS_FEEDS.items()
              if {"CoinDesk": nc.rss_coindesk, "Cointelegraph": nc.rss_cointelegraph, "Decrypt": nc.rss_decrypt}[k]}
+    if nc.rss_turkish:
+        feeds.update(RSS_FEEDS_TR)
+    translator = Translator(email=getattr(settings, "translate_email", "")) if nc.translate_titles else None
     return NewsMonitor(rss_feeds=feeds, use_binance=nc.use_binance_announcements,
                        cryptopanic_token=settings.cryptopanic_token, quote=settings.quote_asset,
-                       block_hours=nc.block_hours, min_severity_block=nc.min_severity_block)
+                       block_hours=nc.block_hours, min_severity_block=nc.min_severity_block, translator=translator)
 
 
 class NewsTab(QWidget):
@@ -47,8 +52,10 @@ class NewsTab(QWidget):
         self.auto.setToolTip("Bot Zeka Motoru ile çalışırken haberleri bot tarar; bu ekran kendiliğinden güncellenir.")
         self.auto.toggled.connect(self._toggle_auto)
         self.category = QComboBox()
-        self.category.addItems(["Tümü", "LISTING", "DELISTING", "FUTURES_LISTING", "LAUNCHPOOL", "HACK",
-                                "REGULATION_NEG", "PARTNERSHIP", "MACRO", "GENERAL"])
+        self.category.addItem("Tümü", "")
+        for code in ["LISTING", "DELISTING", "FUTURES_LISTING", "LAUNCHPOOL", "HACK", "REGULATION_NEG",
+                     "PARTNERSHIP", "MACRO", "GENERAL"]:
+            self.category.addItem(tr(code), code)
         self.category.currentIndexChanged.connect(lambda _: self._render())
         self.coin = QLineEdit()
         self.coin.setPlaceholderText("Coin filtresi (ör. SOL)")
@@ -146,6 +153,12 @@ class NewsTab(QWidget):
         self.s_ct.setChecked(nc.rss_cointelegraph)
         self.s_dc = QCheckBox("Decrypt RSS")
         self.s_dc.setChecked(nc.rss_decrypt)
+        self.s_trfeeds = QCheckBox("Türkçe kaynaklar: Cointürk, Koinmedya, BTC Haber (RSS)")
+        self.s_trfeeds.setChecked(nc.rss_turkish)
+        self.s_translate = QCheckBox("İngilizce haber başlıklarını Türkçeye çevir (ücretsiz çeviri servisi)")
+        self.s_translate.setChecked(nc.translate_titles)
+        self.s_tr_email = QLineEdit(ctx.settings.translate_email)
+        self.s_tr_email.setPlaceholderText("İsteğe bağlı — yalnızca MyMemory günlük çeviri kotasını artırmak için")
         self.s_token = QLineEdit(ctx.settings.cryptopanic_token)
         self.s_token.setEchoMode(QLineEdit.EchoMode.Password)
         self.s_token.setPlaceholderText("İsteğe bağlı — cryptopanic.com'dan ücretsiz")
@@ -157,9 +170,7 @@ class NewsTab(QWidget):
         self.s_delist.setChecked(nc.delist_exit)
         self.s_listing = QCheckBox("Yeni listelemelerde işlem yap (Yeni Listeleme stratejisi)")
         self.s_listing.setChecked(lc.enabled)
-        self.s_stage = QComboBox()
-        self.s_stage.addItems(["PAPER", "SHADOW", "LIMITED_LIVE", "FULL_LIVE"])
-        self.s_stage.setCurrentText(lc.stage if lc.stage in ("PAPER", "SHADOW", "LIMITED_LIVE", "FULL_LIVE") else "PAPER")
+        self.s_stage = stage_combo(lc.stage, ["PAPER", "SHADOW", "LIMITED_LIVE", "FULL_LIVE"])
         self.s_wait = QSpinBox()
         self.s_wait.setRange(1, 240)
         self.s_wait.setValue(lc.wait_minutes)
@@ -169,17 +180,15 @@ class NewsTab(QWidget):
         self.c_enabled.setChecked(cc.enabled)
         self.c_trade = QCheckBox("AL öngörülerinde işlem aç (aşamaya bağlı)")
         self.c_trade.setChecked(cc.trade_enabled)
-        self.c_stage = QComboBox()
-        self.c_stage.addItems(["PAPER", "SHADOW", "LIMITED_LIVE", "FULL_LIVE"])
-        self.c_stage.setCurrentText(cc.stage if cc.stage in ("PAPER", "SHADOW", "LIMITED_LIVE", "FULL_LIVE")
-                                    else "PAPER")
+        self.c_stage = stage_combo(cc.stage, ["PAPER", "SHADOW", "LIMITED_LIVE", "FULL_LIVE"])
         self.c_any = QCheckBox("İzinli sembol listesi dışındaki Binance USDT çiftlerinde de işlem aç")
         self.c_any.setChecked(cc.any_binance_pair)
         save = QPushButton("Kaydet")
         save.clicked.connect(self.save_settings)
         self.s_msg = QLabel()
         for label, w in (("", self.s_enabled), ("", self.s_binance), ("", self.s_cd), ("", self.s_ct),
-                         ("", self.s_dc), ("CryptoPanic API anahtarı", self.s_token),
+                         ("", self.s_dc), ("", self.s_trfeeds), ("", self.s_translate),
+                         ("Çeviri e-postası", self.s_tr_email), ("CryptoPanic API anahtarı", self.s_token),
                          ("Olumsuz haber sonrası LONG yasağı", self.s_block), ("", self.s_delist),
                          ("", self.s_listing), ("Listeleme stratejisi aşaması", self.s_stage),
                          ("Açılıştan sonra bekleme", self.s_wait), ("", self.c_enabled), ("", self.c_trade),
@@ -267,7 +276,7 @@ class NewsTab(QWidget):
             self.sources.setText(f"{n_new} yeni haber, {len(events)} listeleme olayı. Kaynaklar: " +
                                  " | ".join(f"{k}: {v}" for k, v in status.items()))
             for ev in events:
-                self.ctx.status(f"Listeleme: {ev.symbol} ({ev.kind})")
+                self.ctx.status(f"Listeleme: {ev.symbol} ({tr(ev.kind)})")
 
         def failed(msg):
             self.refresh_btn.setEnabled(True)
@@ -276,22 +285,22 @@ class NewsTab(QWidget):
         self.ctx.tasks.run(work, done, failed)
 
     def _render(self):
-        cat = self.category.currentText()
+        cat = self.category.currentData() or ""
         coin = self.coin.text().strip().upper()
         rows, colors, self._shown = [], [], []
         for it in self.items:
-            if cat != "Tümü" and it.category != cat:
+            if cat and it.category != cat:
                 continue
             if coin and coin not in it.symbols:
                 continue
             self._shown.append(it)
-            rows.append([it.published_at[:16].replace("T", " "), it.source, it.category, ", ".join(it.symbols),
-                         f"{it.sentiment:+.2f}", it.title])
+            rows.append([it.published_at[:16].replace("T", " "), it.source, tr(it.category), ", ".join(it.symbols),
+                         f"{it.sentiment:+.2f}", it.display_title])
             colors.append(CATEGORY_COLORS.get(it.category))
         fill_table(self.news_table, rows, colors)
 
     def _render_listings(self, listings):
-        rows = [[e.symbol, e.kind, e.detected_at[:16].replace("T", " "), e.status, e.source] for e in listings]
+        rows = [[e.symbol, tr(e.kind), e.detected_at[:16].replace("T", " "), e.status, e.source] for e in listings]
         fill_table(self.list_table, rows)
 
     def _open_news(self, index):
@@ -461,14 +470,16 @@ class NewsTab(QWidget):
         nc.use_binance_announcements = self.s_binance.isChecked()
         nc.rss_coindesk, nc.rss_cointelegraph, nc.rss_decrypt = (self.s_cd.isChecked(), self.s_ct.isChecked(),
                                                                   self.s_dc.isChecked())
+        nc.rss_turkish = self.s_trfeeds.isChecked()
+        nc.translate_titles = self.s_translate.isChecked()
         nc.block_hours = float(self.s_block.value())
         nc.delist_exit = self.s_delist.isChecked()
         lc.enabled = self.s_listing.isChecked()
-        lc.stage = self.s_stage.currentText()
+        lc.stage = self.s_stage.currentData()
         lc.wait_minutes = self.s_wait.value()
         cfg.catalyst.enabled = self.c_enabled.isChecked()
         cfg.catalyst.trade_enabled = self.c_trade.isChecked()
-        cfg.catalyst.stage = self.c_stage.currentText()
+        cfg.catalyst.stage = self.c_stage.currentData()
         cfg.catalyst.any_binance_pair = self.c_any.isChecked()
         try:
             save_intel_config(cfg)
@@ -477,6 +488,7 @@ class NewsTab(QWidget):
             self.s_msg.setText(str(exc))
             return
         self.ctx.settings.cryptopanic_token = self.s_token.text().strip()
+        self.ctx.settings.translate_email = self.s_tr_email.text().strip()
         self.ctx.persist()
         self.ctx.intel_tab.load_cfg()
         self.s_msg.setStyleSheet(f"color:{GREEN};")

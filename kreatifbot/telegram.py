@@ -16,6 +16,9 @@ from datetime import datetime
 
 import requests
 
+from .i18n import LISTING_KIND_TR, tr, tr_reason
+from .intel.translate import display_title
+
 logger = logging.getLogger("kreatifbot.telegram")
 
 API_URL = "https://api.telegram.org/bot{token}/{method}"
@@ -220,7 +223,7 @@ class TelegramNotifier:
             t = payload
             icon = "💰" if t.pnl > 0 else "🔻"
             title = "SATIŞ" if getattr(t, "side", "LONG") == "LONG" else "SHORT KAPANDI"
-            return (f"{icon} <b>{title} — {esc(t.symbol)}</b> ({esc(t.reason)})\n"
+            return (f"{icon} <b>{title} — {esc(t.symbol)}</b> ({esc(tr_reason(t.reason))})\n"
                     f"Giriş {_num(t.entry_price)} → Çıkış {_num(t.exit_price)}\n"
                     f"K/Z: <b>{t.pnl:+.2f} {self.quote} ({t.pnl_pct:+.2f}%)</b>")
         if kind == "news" and self.notify.get("news", True):
@@ -228,12 +231,11 @@ class TelegramNotifier:
             icon = {"DELISTING": "🚫", "HACK": "🚨", "REGULATION_NEG": "⚖️", "LISTING": "🆕",
                     "FUTURES_LISTING": "🆕", "LAUNCHPOOL": "🎁"}.get(it.category, "📰")
             coins = f" [{', '.join(it.symbols)}]" if it.symbols else ""
-            return (f"{icon} <b>{esc(it.category)}</b>{esc(coins)} — {esc(it.source)}\n{esc(it.title)}\n"
+            return (f"{icon} <b>{esc(tr(it.category))}</b>{esc(coins)} — {esc(it.source)}\n{esc(display_title(it))}\n"
                     f"Duyarlılık {it.sentiment:+.2f}" + (f"\n{esc(it.url)}" if it.url else ""))
         if kind == "listing" and self.notify.get("news", True):
             ev = payload
-            label = {"NEW_SYMBOL": "Yeni işlem çifti", "NOW_TRADING": "İşleme açıldı", "ANNOUNCED": "Duyuruldu",
-                     "HALTED": "İşlem durduruldu"}.get(ev.kind, ev.kind)
+            label = LISTING_KIND_TR.get(ev.kind, ev.kind)
             return f"🆕 <b>Listeleme: {esc(ev.symbol)}</b> — {label} ({esc(ev.source)}, durum {esc(ev.status or '-')})"
         if kind == "insight" and self.notify.get("news", True):
             ins = payload
@@ -299,7 +301,7 @@ class TelegramNotifier:
         lines = [f"<b>Son {len(trades)} işlem</b>"]
         for t in reversed(trades):
             lines.append(f"{'💰' if t.pnl > 0 else '🔻'} {esc(t.symbol)} {t.pnl:+.2f} ({t.pnl_pct:+.2f}%) "
-                         f"– {esc(t.reason)} – {esc(t.closed_at)}")
+                         f"– {esc(tr_reason(t.reason))} – {esc(t.closed_at)}")
         return "\n".join(lines)
 
     def summary_text(self) -> str:

@@ -209,6 +209,8 @@ class NewsConfig:
     rss_coindesk: bool = True
     rss_cointelegraph: bool = True
     rss_decrypt: bool = True
+    rss_turkish: bool = True             # Cointürk, Koinmedya, BTC Haber
+    translate_titles: bool = True        # İngilizce başlıkları Türkçeye çevir (yalnızca gösterim)
     block_hours: float = 24.0            # Olumsuz haber sonrası yeni LONG yasağı süresi
     min_severity_block: int = 2
     delist_exit: bool = True             # Delist duyurusunda açık pozisyonu kapat

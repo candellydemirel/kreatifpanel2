@@ -4,7 +4,9 @@ Kaynaklar:
 - Binance duyuruları (CMS, herkese açık ama resmi belgelenmemiş uç nokta; biçim değişirse
   kaynak 'erişilemiyor' olarak işaretlenir): yeni listeleme, delist, futures listeleme.
 - Binance exchangeInfo farkı (resmi API): yeni açılan / durumu değişen USDT çiftleri.
-- RSS: CoinDesk, Cointelegraph, Decrypt (anahtar gerekmez).
+- RSS: CoinDesk, Cointelegraph, Decrypt (İngilizce) ve Cointürk, Koinmedya, BTC Haber (Türkçe).
+- İngilizce başlıklar gösterim için Türkçeye çevrilir (bkz. translate.py); sınıflandırma orijinal
+  metin üzerinde yapılır.
 - CryptoPanic (isteğe bağlı, ücretsiz API anahtarı ile).
 
 Haberler deterministik anahtar kelime kurallarıyla sınıflandırılır. Haber tek başına
@@ -42,28 +44,34 @@ RSS_FEEDS = {
     "Cointelegraph": "https://cointelegraph.com/rss",
     "Decrypt": "https://decrypt.co/feed",
 }
+RSS_FEEDS_TR = {
+    "Cointürk": "https://coin-turk.com/feed",
+    "Koinmedya": "https://koinmedya.com/feed",
+    "BTC Haber": "https://www.btchaber.com/feed/",
+}
 CRYPTOPANIC_URL = "https://cryptopanic.com/api/v1/posts/"
 
 # Kategori → (anahtar kelimeler, önem 0-3, yön -1/0/+1)
 CATEGORIES = [
     ("DELISTING", [r"\bdelist", r"will (cease|end) trading", r"remove .* trading pairs?", r"işlemden kald",
-                   r"monitoring tag"], 3, -1),
+                   r"monitoring tag", r"listeden çıkar", r"delist"], 3, -1),
     ("HACK", [r"\bhack(ed|er|s)?\b", r"\bexploit", r"drain(ed)?", r"stolen", r"breach", r"rug ?pull",
-              r"saldırı", r"çalın"], 3, -1),
+              r"saldırı", r"çalın", r"hackl", r"istismar", r"güvenlik açığı", r"dolandırıcılık"], 3, -1),
     ("REGULATION_NEG", [r"\bsec (sues|charges|lawsuit)", r"lawsuit", r"\bban(s|ned)?\b", r"crackdown",
-                        r"investigation", r"\bsued\b", r"yasak", r"dava"], 2, -1),
+                        r"investigation", r"\bsued\b", r"yasak", r"dava", r"soruşturma", r"ceza", r"suçlama"], 2, -1),
     ("FUTURES_LISTING", [r"futures will launch", r"perpetual contract", r"usdⓢ-m .*perpetual",
                          r"launch .*usd.?-margined"], 1, 1),
     ("LISTING", [r"binance will list", r"will list\b", r"\blisting\b", r"adds? .* (spot )?trading pairs?",
-                 r"listeleyecek", r"listeleme"], 2, 1),
+                 r"listeleyecek", r"listeleme", r"listeledi", r"listelen"], 2, 1),
     ("LAUNCHPOOL", [r"launchpool", r"launchpad", r"hodler airdrop", r"megadrop"], 1, 1),
-    ("PARTNERSHIP", [r"partnership", r"integrat", r"etf (approval|approved|inflow)", r"adopt", r"ortaklık"], 1, 1),
-    ("MACRO", [r"\bfed\b", r"interest rate", r"\bcpi\b", r"inflation", r"faiz", r"enflasyon"], 1, 0),
+    ("PARTNERSHIP", [r"partnership", r"integrat", r"etf (approval|approved|inflow)", r"adopt", r"ortaklık",
+                     r"anlaşma", r"iş ?birliği", r"entegrasyon"], 1, 1),
+    ("MACRO", [r"\bfed\b", r"interest rate", r"\bcpi\b", r"inflation", r"faiz", r"enflasyon", r"merkez bankası", r"tüfe"], 1, 0),
 ]
 POS_WORDS = [r"surge", r"soar", r"rall(y|ies)", r"record high", r"approv", r"bullish", r"gain", r"yüksel",
-             r"rekor"]
+             r"rekor", r"ralli", r"sıçra", r"fırla", r"onay", r"boğa"]
 NEG_WORDS = [r"plunge", r"crash", r"slump", r"bearish", r"liquidat", r"outflow", r"fraud", r"collapse",
-             r"düş", r"çöküş"]
+             r"düş", r"çöküş", r"çakıl", r"\bayı\b", r"tasfiye", r"çıkış yaşan"]
 
 NAME_TO_TICKER = {
     "bitcoin": "BTC", "ethereum": "ETH", "ether": "ETH", "solana": "SOL", "ripple": "XRP", "xrp": "XRP",
@@ -89,6 +97,12 @@ class NewsItem:
     severity: int = 0
     sentiment: float = 0.0
     summary: str = ""
+    title_tr: str = ""                   # Türkçe başlık (gösterim için)
+
+    @property
+    def display_title(self) -> str:
+        from .translate import display_title
+        return display_title(self)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -287,7 +301,7 @@ class NewsStore:
     SCHEMA = """
     CREATE TABLE IF NOT EXISTS news (item_id TEXT PRIMARY KEY, source TEXT, title TEXT, url TEXT,
         published_at TEXT, symbols TEXT, category TEXT, severity INTEGER, sentiment REAL, summary TEXT,
-        fetched_at TEXT);
+        fetched_at TEXT, title_tr TEXT);
     CREATE INDEX IF NOT EXISTS ix_news_pub ON news(published_at);
     CREATE TABLE IF NOT EXISTS listings (symbol TEXT, kind TEXT, detected_at TEXT, status TEXT, source TEXT,
         base TEXT, open_time TEXT, PRIMARY KEY(symbol, kind));
@@ -299,6 +313,9 @@ class NewsStore:
         self._lock = threading.Lock()
         with self._conn() as c:
             c.executescript(self.SCHEMA)
+            cols = {r[1] for r in c.execute("PRAGMA table_info(news)")}
+            if "title_tr" not in cols:      # eski veritabanı → sütun ekle
+                c.execute("ALTER TABLE news ADD COLUMN title_tr TEXT")
 
     def _conn(self):
         return sqlite3.connect(self.path, timeout=10)
@@ -309,9 +326,11 @@ class NewsStore:
         now = datetime.now(timezone.utc).isoformat()
         with self._lock, self._conn() as c:
             for it in items:
-                cur = c.execute("INSERT OR IGNORE INTO news VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                cur = c.execute("INSERT OR IGNORE INTO news (item_id, source, title, url, published_at, symbols, "
+                                "category, severity, sentiment, summary, fetched_at, title_tr) "
+                                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                                 (it.item_id, it.source, it.title, it.url, it.published_at, json.dumps(it.symbols),
-                                 it.category, it.severity, it.sentiment, it.summary, now))
+                                 it.category, it.severity, it.sentiment, it.summary, now, it.title_tr or None))
                 if cur.rowcount:
                     new.append(it)
         return new
@@ -319,16 +338,26 @@ class NewsStore:
     def recent(self, hours: float = 48, symbol_base: str | None = None, limit: int = 500) -> list[NewsItem]:
         with self._lock, self._conn() as c:
             rows = c.execute("SELECT item_id, source, title, url, published_at, symbols, category, severity, "
-                             "sentiment, summary FROM news ORDER BY published_at DESC LIMIT ?", (limit,)).fetchall()
+                             "sentiment, summary, title_tr FROM news ORDER BY published_at DESC LIMIT ?",
+                             (limit,)).fetchall()
         out = []
         for r in rows:
-            it = NewsItem(r[0], r[1], r[2], r[3], r[4], json.loads(r[5] or "[]"), r[6], r[7], r[8], r[9] or "")
+            it = NewsItem(r[0], r[1], r[2], r[3], r[4], json.loads(r[5] or "[]"), r[6], r[7], r[8], r[9] or "",
+                          r[10] or "")
             if it.age_hours > hours:
                 continue
             if symbol_base and symbol_base not in it.symbols:
                 continue
             out.append(it)
         return out
+
+    def set_title_tr(self, item_id: str, title_tr: str) -> None:
+        with self._lock, self._conn() as c:
+            c.execute("UPDATE news SET title_tr = ? WHERE item_id = ?", (title_tr, item_id))
+
+    def untranslated(self, limit: int = 30, hours: float = 72) -> list[NewsItem]:
+        """Henüz Türkçe başlığı olmayan son haberler (önce en yeniler)."""
+        return [it for it in self.recent(hours, limit=500) if not it.title_tr][:limit]
 
     def add_listing(self, ev: ListingEvent) -> bool:
         with self._lock, self._conn() as c:
@@ -367,7 +396,8 @@ class NewsContext:
 class NewsMonitor:
     def __init__(self, store: NewsStore | None = None, session=None, rss_feeds: dict | None = None,
                  use_binance: bool = True, cryptopanic_token: str = "", quote: str = "USDT",
-                 block_hours: float = 24.0, min_severity_block: int = 2):
+                 block_hours: float = 24.0, min_severity_block: int = 2, translator=None,
+                 translate_per_poll: int = 40):
         self.store = store or NewsStore()
         self.session = session or requests.Session()
         self.rss_feeds = RSS_FEEDS if rss_feeds is None else rss_feeds
@@ -376,6 +406,8 @@ class NewsMonitor:
         self.quote = quote
         self.block_hours = block_hours
         self.min_severity_block = min_severity_block
+        self.translator = translator
+        self.translate_per_poll = translate_per_poll
         self.source_status: dict[str, str] = {}
         self.known_bases: set = set()
         self.last_poll = 0.0
@@ -407,6 +439,7 @@ class NewsMonitor:
             except NewsSourceError as exc:
                 self.source_status["CryptoPanic"] = f"ERİŞİLEMİYOR: {exc}"
         new_items = self.store.add(items)
+        self.translate_pending(new_items)
         events: list[ListingEvent] = []
         if exchange_symbols:
             prev = self.store.get("exchange_status", {})
@@ -422,6 +455,28 @@ class NewsMonitor:
                         events.append(ev)
         return new_items, events
 
+    def translate_pending(self, new_items: list[NewsItem] | None = None) -> int:
+        """Yeni haberlerin (ve önceki turdan kalanların) başlığını Türkçeye çevirir."""
+        if self.translator is None:
+            return 0
+        done = 0
+        queue = list(new_items or [])
+        seen = {it.item_id for it in queue}
+        queue += [it for it in self.store.untranslated(self.translate_per_poll) if it.item_id not in seen]
+        for it in queue[:self.translate_per_poll]:
+            if it.title_tr:
+                continue
+            out = self.translator.translate(it.title)
+            if not out:
+                if self.translator.status.startswith("Çeviri servislerine"):
+                    break                  # servisler kapalı; sonraki taramada tekrar denenir
+                continue
+            it.title_tr = out
+            self.store.set_title_tr(it.item_id, out)
+            done += 1
+        self.source_status["Türkçe çeviri"] = self.translator.status
+        return done
+
     def context(self, symbol: str) -> NewsContext:
         base = symbol[:-len(self.quote)] if symbol.endswith(self.quote) else symbol
         ctx = NewsContext(symbol)
@@ -433,8 +488,9 @@ class NewsMonitor:
             if it.category == "DELISTING":
                 ctx.block_long = True
                 ctx.force_exit = True
-                ctx.reasons.append(f"Delist duyurusu: {it.title}")
+                ctx.reasons.append(f"Delist duyurusu: {it.display_title}")
             elif it.sentiment < 0 and it.severity >= self.min_severity_block:
                 ctx.block_long = True
-                ctx.reasons.append(f"Olumsuz haber ({it.category}): {it.title}")
+                from ..i18n import tr
+                ctx.reasons.append(f"Olumsuz haber ({tr(it.category)}): {it.display_title}")
         return ctx

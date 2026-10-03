@@ -34,6 +34,7 @@ import requests
 
 from ..config import data_dir
 from .config import CatalystConfig
+from ..i18n import tr
 from .news import NewsItem
 
 DEFILLAMA_PROTOCOLS = "https://api.llama.fi/protocols"
@@ -43,28 +44,32 @@ COINGECKO_COIN = "https://api.coingecko.com/api/v3/coins/{id}"
 # tür → (desenler, ağırlık)
 CATALYST_RULES = [
     ("DELISTING", [r"\bdelist", r"will (cease|end) trading"], -1.0),
-    ("HACK", [r"\bhack(ed|er|s)?\b", r"\bexploit", r"drain(ed)?", r"stolen", r"rug ?pull", r"breach"], -1.0),
+    ("HACK", [r"\bhack(ed|er|s)?\b", r"\bexploit", r"drain(ed)?", r"stolen", r"rug ?pull", r"breach",
+              r"saldırı", r"hackl", r"çalın", r"istismar", r"güvenlik açığı"], -1.0),
     ("REGULATION_NEG", [r"\bsec (sues|charges)", r"lawsuit", r"\bsued\b", r"\bban(s|ned)?\b", r"crackdown",
-                        r"dava", r"yasak"], -0.8),
+                        r"dava", r"yasak", r"soruşturma", r"suçlama"], -0.8),
     ("TOKEN_UNLOCK", [r"token unlock", r"\bunlocks?\b", r"vesting (cliff|release)", r"kilit (açılımı|açılması)"],
      -0.6),
-    ("ETF", [r"\betf\b.*(approv|filing|files|launch|inflow)", r"spot etf"], 1.0),
+    ("ETF", [r"\betf\b.*(approv|filing|files|launch|inflow)", r"spot etf", r"etf.*(onay|başvuru|giriş)"], 1.0),
     ("PARTNERSHIP", [r"partner(s|ed|ship)? with", r"partnership", r"teams? up", r"collaborat",
                      r"signs? (a |an )?(deal|agreement|mou|contract)", r"strategic (deal|alliance|investment)",
-                     r"integrat(es|ed|ion) (with|into)", r"anlaşma", r"ortaklık", r"iş ?birliği"], 1.0),
+                     r"integrat(es|ed|ion) (with|into)", r"anlaşma", r"ortaklık", r"iş ?birliği", r"ortak oldu",
+                     r"entegre (etti|ediyor|edildi)", r"entegrasyon"], 1.0),
     ("INSTITUTIONAL", [r"(treasury|reserve)s? (buys?|adds?|purchases?)", r"institutional (adoption|demand|investors?)",
                        r"\b(blackrock|fidelity|visa|mastercard|paypal|stripe|google|microsoft|amazon|nvidia|jpmorgan)\b"],
      0.9),
-    ("MAINNET_UPGRADE", [r"mainnet", r"upgrade (goes live|activated|completed|is live)", r"hard ?fork",
+    ("MAINNET_UPGRADE", [r"mainnet", r"upgrade (goes live|activated|completed|is live)", r"hard ?fork", r"güncellemesi (yayında|aktif|tamamlandı)",
                          r"launch(es|ed)? (its |the )?(v\d|protocol|network|chain|layer)", r"ana ağ"], 0.8),
     ("EXCHANGE_LISTING", [r"(coinbase|upbit|robinhood|kraken|okx|bybit) (will )?(list|adds?)",
-                          r"listing on (coinbase|upbit|robinhood|kraken)", r"binance will list"], 0.7),
+                          r"listing on (coinbase|upbit|robinhood|kraken)", r"binance will list",
+                          r"(coinbase|upbit|robinhood|kraken|okx|bybit).*listeled"], 0.7),
     ("ADOPTION", [r"adopts?\b", r"adoption", r"accepts? .*payments?", r"payments? (with|in) \w+", r"benimse"], 0.6),
-    ("FUNDING", [r"raises? \$", r"funding round", r"series [abc]\b", r"seed round", r"yatırım turu"], 0.5),
-    ("BURN_BUYBACK", [r"\bburn(s|ed)?\b", r"buy-?back", r"yakım"], 0.5),
+    ("FUNDING", [r"raises? \$", r"funding round", r"series [abc]\b", r"seed round", r"yatırım turu", r"fon topladı", r"yatırım aldı"], 0.5),
+    ("BURN_BUYBACK", [r"\bburn(s|ed)?\b", r"buy-?back", r"yakım", r"geri alım"], 0.5),
 ]
 RUMOR = [r"\brumou?r", r"reportedly", r"\bcould\b", r"\bmay\b", r"speculat", r"unconfirmed", r"söylenti", r"iddia"]
-SOURCE_WEIGHT = {"Binance duyuru": 1.0, "CoinDesk": 0.9, "Cointelegraph": 0.8, "Decrypt": 0.8, "CryptoPanic": 0.6}
+SOURCE_WEIGHT = {"Binance duyuru": 1.0, "CoinDesk": 0.9, "Cointelegraph": 0.8, "Decrypt": 0.8, "CryptoPanic": 0.6,
+                 "Cointürk": 0.7, "Koinmedya": 0.7, "BTC Haber": 0.7}
 
 CATALYST_TR = {
     "PARTNERSHIP": "ortaklık/anlaşma", "ETF": "ETF", "INSTITUTIONAL": "kurumsal ilgi", "MAINNET_UPGRADE":
@@ -128,7 +133,7 @@ def score_catalysts(base: str, items: list[NewsItem], cfg: CatalystConfig) -> Ca
             sources.add(it.source)
             if first is None or it.published_at < first:
                 first = it.published_at
-        res.headlines.append(f"[{it.source}] {it.title}")
+        res.headlines.append(f"[{it.source}] {it.display_title}")
     if len(sources) >= 2:
         pos_raw *= 1.0 + 0.15 * (len(sources) - 1)  # bağımsız kaynak teyidi
     res.score = round(100 * (1 - math.exp(-pos_raw)), 1)
@@ -361,7 +366,7 @@ class Insight:
         lines += [f"  • {h}" for h in c.headlines[:5]]
         if c.negative:
             lines.append(f"Olumsuz baskı: {c.negative:.0f}/100")
-        lines.append(f"Temel skor: {'UNAVAILABLE' if fd.score is None else f'{fd.score:.0f}/100'} "
+        lines.append(f"Temel skor: {'Veri yok' if fd.score is None else f'{fd.score:.0f}/100'} "
                      f"(kapsam %{fd.coverage * 100:.0f})")
         if fd.tvl:
             lines.append(f"  TVL {fd.tvl:,.0f} USD, 7g değişim {fd.tvl_change_7d if fd.tvl_change_7d is not None else '-'}%"
@@ -372,7 +377,7 @@ class Insight:
             lines.append(f"  Piyasa değeri sırası #{fd.rank}" + (f", yaş {fd.age_years:.1f} yıl" if fd.age_years else ""))
         if fd.whitepaper:
             lines.append(f"  Whitepaper: {fd.whitepaper}")
-        lines.append(f"Teknik: {'UNAVAILABLE' if tc.score is None else f'{tc.score:.0f}/100'}, rejim {tc.regime}, "
+        lines.append(f"Teknik: {'Veri yok' if tc.score is None else f'{tc.score:.0f}/100'}, rejim {tr(tc.regime)}, "
                      f"24s hacim {tc.quote_volume_24h:,.0f} USDT"
                      + (f", haberden beri %{tc.move_since_news_pct:+.1f}" if tc.move_since_news_pct is not None else ""))
         if self.signal == "AL":

@@ -236,6 +236,18 @@ def interval_combo(default: str = "1h") -> QComboBox:
     return box
 
 
+def stage_combo(current: str, choices: list[str] | None = None) -> QComboBox:
+    """Aşama seçici: Türkçe etiket gösterir, kodu (PAPER, LIMITED_LIVE…) currentData() ile verir."""
+    from ..i18n import tr
+    from ..intel.types import LifecycleStage
+    box = QComboBox()
+    for code in choices or [s.value for s in LifecycleStage]:
+        box.addItem(f"{tr(code)} ({code})", code)
+    idx = box.findData(current)
+    box.setCurrentIndex(idx if idx >= 0 else max(0, box.findData("PAPER")))
+    return box
+
+
 def combo_symbol(box: QComboBox) -> str:
     return box.currentText().strip().upper().replace("/", "").replace("-", "")
 
